@@ -1,53 +1,93 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
 import { Platform } from 'react-native';
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    text: '#1A1A1A',
+    textSecondary: '#6B6B6B',
+    textTertiary: '#999999',
+    background: '#FFFFFF',
+    surfaceRaised: '#F6F6F6',
+    tint: '#1A1A1A',
+    icon: '#888888',
+    iconMuted: '#CCCCCC',
+    border: 'rgba(0,0,0,0.07)',
+    borderStrong: 'rgba(0,0,0,0.12)',
+    activeIndicator: '#1A1A1A',
+    tabIconDefault: '#888888',
+    tabIconSelected: '#1A1A1A',
+    success: '#34C759',
+    destructive: '#FF3B30',
+    notificationDot: '#FF9500',
+    overlay: 'rgba(0,0,0,0.3)',
+    sheetBackground: '#FFFFFF',
+    sheetHandle: '#D4D4D4',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    text: '#E8E8E8',
+    textSecondary: '#999999',
+    textTertiary: '#666666',
+    background: '#161616',
+    surfaceRaised: '#1E1E1E',
+    tint: '#E8E8E8',
+    icon: '#777777',
+    iconMuted: '#444444',
+    border: 'rgba(255,255,255,0.07)',
+    borderStrong: 'rgba(255,255,255,0.12)',
+    activeIndicator: '#E8E8E8',
+    tabIconDefault: '#777777',
+    tabIconSelected: '#E8E8E8',
+    success: '#30D158',
+    destructive: '#FF453A',
+    notificationDot: '#FF9F0A',
+    overlay: 'rgba(0,0,0,0.5)',
+    sheetBackground: '#1E1E1E',
+    sheetHandle: '#444444',
   },
 };
 
+export const WorkspaceColors = [
+  '#7B8EC8',
+  '#6BA3A0',
+  '#C49B7A',
+  '#7DAA8B',
+  '#A48BBF',
+  '#BF8A9E',
+  '#8E9B82',
+  '#B5A07A',
+];
+
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
+    sans: 'DMSans-Regular',
+    sansItalic: 'DMSans-Italic',
+    sansMedium: 'DMSans-Medium',
+    sansMediumItalic: 'DMSans-MediumItalic',
+    sansSemiBold: 'DMSans-SemiBold',
+    sansBold: 'DMSans-Bold',
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+    mono: 'JetBrainsMono-Regular',
   },
   default: {
-    sans: 'normal',
+    sans: 'DMSans-Regular',
+    sansItalic: 'DMSans-Italic',
+    sansMedium: 'DMSans-Medium',
+    sansMediumItalic: 'DMSans-MediumItalic',
+    sansSemiBold: 'DMSans-SemiBold',
+    sansBold: 'DMSans-Bold',
     serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
+    rounded: 'DMSans-Regular',
+    mono: 'JetBrainsMono-Regular',
   },
   web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    sans: "'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    sansItalic: "'DM Sans', system-ui, sans-serif",
+    sansMedium: "'DM Sans', system-ui, sans-serif",
+    sansMediumItalic: "'DM Sans', system-ui, sans-serif",
+    sansSemiBold: "'DM Sans', system-ui, sans-serif",
+    sansBold: "'DM Sans', system-ui, sans-serif",
     serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    rounded: "'DM Sans', system-ui, sans-serif",
+    mono: "'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace",
   },
 });

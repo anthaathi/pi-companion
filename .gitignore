@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules/
+.yarn/install-state.gz
 
 # Expo
 .expo/
@@ -37,6 +38,12 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+
+# backend config (generated via `pi-server init`)
+backend/config.toml
+backend/*.db
+backend/target/
+unsloth_compiled_cache/
 
 # generated native folders
 /ios

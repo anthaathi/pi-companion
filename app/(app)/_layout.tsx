@@ -1,0 +1,67 @@
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import { Redirect, Slot } from 'expo-router';
+
+import { AdaptiveNavigation } from '@/features/navigation/containers/adaptive-navigation';
+import { useAuthStore } from '@/features/auth/store';
+import { useServersStore } from '@/features/servers/store';
+import { useWorkspaceStore } from '@/features/workspace/store';
+import { useAgentStream } from '@/features/agent/hooks/use-agent-stream';
+
+export default function AppLayout() {
+  const serversLoaded = useServersStore((s) => s.loaded);
+  const servers = useServersStore((s) => s.servers);
+  const authLoaded = useAuthStore((s) => s.loaded);
+  const activeServerId = useAuthStore((s) => s.activeServerId);
+  const hasToken = useAuthStore((s) => s.hasToken);
+  const activateServer = useAuthStore((s) => s.activateServer);
+  const fetchWorkspaces = useWorkspaceStore((s) => s.fetchWorkspaces);
+
+  const [status, setStatus] = useState<'loading' | 'ready' | 'no-server'>('loading');
+
+  useAgentStream();
+
+  useEffect(() => {
+    if (!serversLoaded || !authLoaded) return;
+
+    const candidate = activeServerId
+      ? servers.find((s) => s.id === activeServerId && hasToken(s.id))
+      : servers.find((s) => hasToken(s.id));
+
+    if (!candidate) {
+      setStatus('no-server');
+      return;
+    }
+
+    let cancelled = false;
+    activateServer(candidate).then((valid) => {
+      if (cancelled) return;
+      if (!valid) {
+        setStatus('no-server');
+        return;
+      }
+      fetchWorkspaces().then(() => {
+        if (!cancelled) setStatus('ready');
+      });
+    });
+    return () => { cancelled = true; };
+  }, [serversLoaded, authLoaded, activeServerId, servers, hasToken, activateServer, fetchWorkspaces]);
+
+  if (!serversLoaded || !authLoaded || status === 'loading') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  if (status === 'no-server') {
+    return <Redirect href="/servers" />;
+  }
+
+  return (
+    <AdaptiveNavigation>
+      <Slot />
+    </AdaptiveNavigation>
+  );
+}

@@ -1,0 +1,145 @@
+import { useCallback } from "react";
+import { useQuery, useSuspenseQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  getAvailableModels,
+  setModel as apiSetModel,
+  setThinkingLevel as apiSetThinkingLevel,
+  getState as apiGetState,
+} from "@/features/api/generated/sdk.gen";
+import { unwrapApiData } from "@/features/api/unwrap";
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+  reasoning?: boolean;
+}
+
+export const THINKING_LEVELS = [
+  "off",
+  "low",
+  "medium",
+  "high",
+] as const;
+
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+export function useAgentModels(sessionId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["agent-models", sessionId],
+    queryFn: async () => {
+      const result = await getAvailableModels({
+        body: { session_id: sessionId! },
+      });
+      if (result.error) throw new Error("Failed to fetch models");
+      const data = unwrapApiData(result.data) as { models?: any[] } | undefined;
+      const models: ModelInfo[] = (data?.models ?? []).map((m: any) => ({
+        id: m.id,
+        name: m.name ?? m.id,
+        provider: m.provider ?? "unknown",
+        reasoning: m.reasoning ?? false,
+      }));
+      return models;
+    },
+    enabled: !!sessionId,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useAgentState(sessionId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["agent-state", sessionId],
+    queryFn: async () => {
+      const result = await apiGetState({
+        body: { session_id: sessionId! },
+      });
+      if (result.error) throw new Error("Failed to fetch state");
+      const data = unwrapApiData(result.data) as Record<string, any> | undefined;
+      return {
+        model: data?.model as ModelInfo | null,
+        thinkingLevel: (data?.thinkingLevel ?? "medium") as ThinkingLevel,
+      };
+    },
+    enabled: !!sessionId,
+    staleTime: 30_000,
+  });
+}
+
+export function useAgentModelsSuspense(sessionId: string) {
+  return useSuspenseQuery({
+    queryKey: ["agent-models", sessionId],
+    queryFn: async () => {
+      const result = await getAvailableModels({
+        body: { session_id: sessionId },
+      });
+      if (result.error) throw new Error("Failed to fetch models");
+      const data = unwrapApiData(result.data) as { models?: any[] } | undefined;
+      const models: ModelInfo[] = (data?.models ?? []).map((m: any) => ({
+        id: m.id,
+        name: m.name ?? m.id,
+        provider: m.provider ?? "unknown",
+        reasoning: m.reasoning ?? false,
+      }));
+      return models;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useAgentStateSuspense(sessionId: string) {
+  return useSuspenseQuery({
+    queryKey: ["agent-state", sessionId],
+    queryFn: async () => {
+      const result = await apiGetState({
+        body: { session_id: sessionId },
+      });
+      if (result.error) throw new Error("Failed to fetch state");
+      const data = unwrapApiData(result.data) as Record<string, any> | undefined;
+      return {
+        model: data?.model as ModelInfo | null,
+        thinkingLevel: (data?.thinkingLevel ?? "medium") as ThinkingLevel,
+      };
+    },
+    staleTime: 30_000,
+  });
+}
+
+export function useSetModel(sessionId: string | null | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: { provider: string; modelId: string }) => {
+      if (!sessionId) throw new Error("No session");
+      const result = await apiSetModel({
+        body: {
+          session_id: sessionId,
+          provider: params.provider,
+          modelId: params.modelId,
+        },
+      });
+      if (result.error) throw new Error("Failed to set model");
+      return unwrapApiData(result.data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agent-state", sessionId] });
+    },
+  });
+}
+
+export function useSetThinkingLevel(sessionId: string | null | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (level: string) => {
+      if (!sessionId) throw new Error("No session");
+      const result = await apiSetThinkingLevel({
+        body: { session_id: sessionId, level },
+      });
+      if (result.error) throw new Error("Failed to set thinking level");
+      return unwrapApiData(result.data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agent-state", sessionId] });
+    },
+  });
+}

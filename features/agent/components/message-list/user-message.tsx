@@ -1,0 +1,91 @@
+import { useEffect, useRef } from "react";
+import { Animated, StyleSheet, Text, View } from "react-native";
+
+import { Colors, Fonts } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
+import type { ChatMessage } from "../../types";
+
+export function UserMessage({
+  message,
+  animateOnMount = true,
+}: {
+  message: ChatMessage;
+  animateOnMount?: boolean;
+}) {
+  const colorScheme = useColorScheme() ?? "light";
+  const colors = Colors[colorScheme];
+  const isDark = colorScheme === "dark";
+
+  const opacity = useRef(new Animated.Value(animateOnMount ? 0 : 1)).current;
+  const translateY = useRef(
+    new Animated.Value(animateOnMount ? 6 : 0),
+  ).current;
+
+  useEffect(() => {
+    if (!animateOnMount) {
+      return;
+    }
+
+    const animation = Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]);
+
+    animation.start();
+    return () => animation.stop();
+  }, [animateOnMount, opacity, translateY]);
+
+  return (
+    <Animated.View
+      style={[styles.row, { opacity, transform: [{ translateY }] }]}
+    >
+      <View
+        style={[
+          styles.bubble,
+          {
+            backgroundColor: isDark ? "#2A2A2A" : "#F0F0F0",
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.text,
+            { color: isDark ? "#E8E8E8" : colors.text },
+          ]}
+          selectable
+        >
+          {message.text}
+        </Text>
+      </View>
+    </Animated.View>
+  );
+}
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  bubble: {
+    maxWidth: "80%",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 16,
+    borderTopRightRadius: 4,
+  },
+  text: {
+    fontSize: 14,
+    fontFamily: Fonts.sans,
+    lineHeight: 21,
+  },
+});
