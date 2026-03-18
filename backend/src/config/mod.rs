@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+fn default_access_token_ttl_minutes() -> u64 {
+    15
+}
+
+fn default_refresh_token_ttl_days() -> u64 {
+    30
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AppConfig {
     pub server: ServerConfig,
@@ -31,7 +39,12 @@ pub struct ServerConfig {
 pub struct AuthConfig {
     pub username: String,
     pub password_hash: String,
-    pub session_ttl_hours: u64,
+    #[serde(default = "default_access_token_ttl_minutes")]
+    pub access_token_ttl_minutes: u64,
+    #[serde(default = "default_refresh_token_ttl_days")]
+    pub refresh_token_ttl_days: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_ttl_hours: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -51,7 +64,9 @@ impl Default for AppConfig {
             auth: AuthConfig {
                 username: "admin".to_string(),
                 password_hash: String::new(),
-                session_ttl_hours: 24,
+                access_token_ttl_minutes: default_access_token_ttl_minutes(),
+                refresh_token_ttl_days: default_refresh_token_ttl_days(),
+                session_ttl_hours: None,
             },
             package: PackageConfig {
                 name: "@mariozechner/pi-coding-agent".to_string(),
@@ -105,7 +120,25 @@ impl AppConfig {
         let config_path = path.unwrap_or_else(|| PathBuf::from("config.toml"));
         let mut config = if config_path.exists() {
             let content = std::fs::read_to_string(&config_path)?;
-            toml::from_str(&content)?
+            let raw: toml::Value = toml::from_str(&content)?;
+            let config: AppConfig = toml::from_str(&content)?;
+
+            let auth_table = raw.get("auth").and_then(|value| value.as_table());
+            let has_legacy_ttl = auth_table.is_some_and(|table| table.contains_key("session_ttl_hours"));
+            let has_access_ttl =
+                auth_table.is_some_and(|table| table.contains_key("access_token_ttl_minutes"));
+            let has_refresh_ttl =
+                auth_table.is_some_and(|table| table.contains_key("refresh_token_ttl_days"));
+
+            if has_legacy_ttl && !has_access_ttl && !has_refresh_ttl {
+                tracing::warn!(
+                    "config.toml uses deprecated auth.session_ttl_hours; using auth.access_token_ttl_minutes={} and auth.refresh_token_ttl_days={}",
+                    config.auth.access_token_ttl_minutes,
+                    config.auth.refresh_token_ttl_days
+                );
+            }
+
+            config
         } else {
             AppConfig::default()
         };

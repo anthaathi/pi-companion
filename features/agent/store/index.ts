@@ -1,5 +1,36 @@
 import { create } from "zustand";
-import type { ChatMessage, StreamEvent, ToolCallInfo } from "../types";
+import type {
+  AgentConnectionState,
+  ChatMessage,
+  StreamEvent,
+  ToolCallInfo,
+} from "../types";
+import {
+  parsePendingExtensionUiRequest,
+  type PendingExtensionUiRequest,
+} from "../extension-ui";
+import { extractAgentMode, type AgentMode } from "../mode";
+
+const PENDING_EXTENSION_UI_CLEAR_EVENTS = new Set([
+  "turn_start",
+  "message_start",
+  "message_update",
+  "message_end",
+  "tool_execution_start",
+  "tool_execution_update",
+  "tool_execution_end",
+  "turn_end",
+  "agent_end",
+  "session_process_exited",
+]);
+
+const DEFAULT_CONNECTION_STATE: AgentConnectionState = {
+  status: "idle",
+  retryAttempt: 0,
+  nextRetryAt: null,
+  lastDisconnectReason: null,
+  disconnectedAt: null,
+};
 
 function findToolCall(
   messages: ChatMessage[],
@@ -21,6 +52,11 @@ function extractTextFromContent(content: any[] | undefined): string {
     .filter((c) => c.type === "text")
     .map((c) => c.text ?? "")
     .join("");
+}
+
+function isModeSlashCommand(message: string): boolean {
+  const firstToken = message.trim().split(/\s+/)[0];
+  return firstToken === "/chat" || firstToken === "/plan";
 }
 
 function getStableMessageId(msg: any, role: ChatMessage["role"], index: number): string {
@@ -109,25 +145,39 @@ function convertPiMessages(piMessages: any[]): ChatMessage[] {
 
 interface AgentState {
   messages: Record<string, ChatMessage[]>;
+  modes: Record<string, AgentMode | null | undefined>;
+  pendingExtensionUiRequests: Record<
+    string,
+    PendingExtensionUiRequest | null | undefined
+  >;
   streaming: Record<string, boolean>;
   lastEventId: number | null;
-  connected: boolean;
+  connection: AgentConnectionState;
+  reconnectNonce: number;
   pendingPrompt: { workspaceId: string; text: string } | null;
 
   processStreamEvent: (event: StreamEvent) => void;
   setHistoryMessages: (sessionId: string, piMessages: any[]) => void;
   clearMessages: (sessionId: string) => void;
-  setConnected: (connected: boolean) => void;
+  setConnectionState: (connection: AgentConnectionState) => void;
+  requestReconnect: () => void;
   setPendingPrompt: (
     pending: { workspaceId: string; text: string } | null,
+  ) => void;
+  setPendingExtensionUiRequest: (
+    sessionId: string,
+    pending: PendingExtensionUiRequest | null,
   ) => void;
 }
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   messages: {},
+  modes: {},
+  pendingExtensionUiRequests: {},
   streaming: {},
   lastEventId: null,
-  connected: false,
+  connection: DEFAULT_CONNECTION_STATE,
+  reconnectNonce: 0,
   pendingPrompt: null,
 
   processStreamEvent: (event: StreamEvent) => {
@@ -137,17 +187,37 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     set((state) => {
       const msgs = [...(state.messages[sessionId] ?? [])];
+      const modes = { ...state.modes };
+      const pendingExtensionUiRequests = {
+        ...state.pendingExtensionUiRequests,
+      };
       const streaming = { ...state.streaming };
+      const streamedMode = extractAgentMode(piEvent);
+
+      if (streamedMode) {
+        modes[sessionId] = streamedMode;
+      }
+
+      if (PENDING_EXTENSION_UI_CLEAR_EVENTS.has(eventType)) {
+        pendingExtensionUiRequests[sessionId] = null;
+      }
 
       switch (eventType) {
         case "client_command": {
-          if (piEvent.type === "prompt" && piEvent.message) {
+          if (
+            ["prompt", "steer", "follow_up"].includes(piEvent.type) &&
+            piEvent.message &&
+            !isModeSlashCommand(piEvent.message)
+          ) {
             msgs.push({
               id: `user-${event.id}`,
               role: "user",
               text: piEvent.message,
               timestamp: event.timestamp,
             });
+          }
+          if (piEvent.type === "extension_ui_response") {
+            pendingExtensionUiRequests[sessionId] = null;
           }
           break;
         }
@@ -157,8 +227,28 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           break;
         }
 
+        case "turn_start": {
+          streaming[sessionId] = true;
+          break;
+        }
+
         case "agent_end": {
           streaming[sessionId] = false;
+          break;
+        }
+
+        case "extension_ui_request": {
+          if (piEvent.method === "setStatus" && piEvent.statusKey === "plan-mode") {
+            const statusText =
+              typeof piEvent.statusText === "string"
+                ? piEvent.statusText.toLowerCase()
+                : "";
+            modes[sessionId] = statusText.includes("plan") ? "plan" : "chat";
+          }
+          const pending = parsePendingExtensionUiRequest(piEvent);
+          if (pending) {
+            pendingExtensionUiRequests[sessionId] = pending;
+          }
           break;
         }
 
@@ -237,6 +327,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               lastMsg.toolCalls = toolCalls;
               break;
             }
+            case "done":
+              lastMsg.isStreaming = false;
+              lastMsg.stopReason =
+                delta.reason ?? piEvent.message?.stopReason;
+              break;
+            case "error":
+              lastMsg.isStreaming = false;
+              lastMsg.stopReason =
+                delta.reason ?? piEvent.message?.stopReason ?? "error";
+              break;
           }
           break;
         }
@@ -280,10 +380,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
           break;
         }
+
+        case "session_process_exited": {
+          streaming[sessionId] = false;
+          break;
+        }
       }
 
       return {
         messages: { ...state.messages, [sessionId]: msgs },
+        modes,
+        pendingExtensionUiRequests,
         streaming,
         lastEventId: event.id,
       };
@@ -291,7 +398,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   setHistoryMessages: (sessionId: string, piMessages: any[]) => {
+    const existing = get().messages[sessionId];
     const converted = convertPiMessages(piMessages);
+    if (!existing || existing.length === 0) {
+      set((state) => ({
+        messages: { ...state.messages, [sessionId]: converted },
+      }));
+      return;
+    }
+    const isStreaming = get().streaming[sessionId];
+    if (isStreaming) return;
+    if (converted.length <= existing.length) return;
     set((state) => ({
       messages: { ...state.messages, [sessionId]: converted },
     }));
@@ -300,11 +417,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   clearMessages: (sessionId: string) => {
     set((state) => {
       const { [sessionId]: _, ...rest } = state.messages;
-      return { messages: rest };
+      const { [sessionId]: ___, ...modeRest } = state.modes;
+      const { [sessionId]: __, ...pendingRest } =
+        state.pendingExtensionUiRequests;
+      return {
+        messages: rest,
+        modes: modeRest,
+        pendingExtensionUiRequests: pendingRest,
+      };
     });
   },
 
-  setConnected: (connected: boolean) => set({ connected }),
+  setConnectionState: (connection) => set({ connection }),
+
+  requestReconnect: () =>
+    set((state) => ({ reconnectNonce: state.reconnectNonce + 1 })),
 
   setPendingPrompt: (pending) => set({ pendingPrompt: pending }),
+
+  setPendingExtensionUiRequest: (sessionId, pending) =>
+    set((state) => ({
+      pendingExtensionUiRequests: {
+        ...state.pendingExtensionUiRequests,
+        [sessionId]: pending,
+      },
+    })),
 }));

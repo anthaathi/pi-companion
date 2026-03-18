@@ -3,6 +3,7 @@ import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, Vi
 import { Check, X } from 'lucide-react-native';
 
 import { Fonts } from '@/constants/theme';
+import { matchesModelSearch } from './model-search';
 import { usePromptTheme } from './use-theme-colors';
 import { ProviderIcon } from './provider-icons';
 import {
@@ -41,7 +42,7 @@ export function MobileModelSheet({
         Animated.spring(slideAnim, { toValue: 0, tension: 120, friction: 14, useNativeDriver: true }),
       ]).start();
     }
-  }, [visible]);
+  }, [overlayAnim, slideAnim, visible]);
 
   const animateClose = (cb: () => void) => {
     Animated.parallel([
@@ -67,11 +68,10 @@ export function MobileModelSheet({
 
   const providers = (() => {
     if (!models) return [];
-    const q = search.toLowerCase();
     const grouped = new Map<string, ModelInfo[]>();
     const order: string[] = [];
     for (const m of models) {
-      if (q && !m.name.toLowerCase().includes(q) && !m.provider.toLowerCase().includes(q)) continue;
+      if (!matchesModelSearch(search, m)) continue;
       if (!grouped.has(m.provider)) {
         grouped.set(m.provider, []);
         order.push(m.provider);

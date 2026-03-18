@@ -11,17 +11,21 @@ pub struct LoginRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct LoginResponse {
-    pub token: String,
-    pub expires_at: DateTime<Utc>,
+pub struct AuthTokensResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub access_expires_at: DateTime<Utc>,
+    pub refresh_expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SessionInfo {
-    pub token: String,
+    pub access_token: String,
+    pub refresh_token: String,
     pub username: String,
     pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
+    pub access_expires_at: DateTime<Utc>,
+    pub refresh_expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -136,9 +140,13 @@ pub struct PairRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct PairResponse {
-    pub token: String,
-    pub expires_at: DateTime<Utc>,
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
+pub struct LogoutRequest {
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

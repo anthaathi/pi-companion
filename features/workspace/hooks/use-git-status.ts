@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Platform } from 'react-native';
 import {
   status as gitStatus,
   stage as gitStage,
@@ -19,31 +20,132 @@ function extract<T>(raw: unknown): T | undefined {
   return envelope as T | undefined;
 }
 
+function extractErrorMessage(raw: unknown): string | undefined {
+  if (!raw) return undefined;
+  if (typeof raw === 'string') return raw;
+  if (raw instanceof Error) return raw.message;
+
+  if (typeof raw === 'object') {
+    const envelope = raw as Record<string, unknown>;
+    if (typeof envelope.error === 'string') return envelope.error;
+    if (typeof envelope.message === 'string') return envelope.message;
+    if (envelope.error) return extractErrorMessage(envelope.error);
+  }
+
+  return undefined;
+}
+
+function isNotGitRepoError(raw: unknown): boolean {
+  const message = extractErrorMessage(raw)?.toLowerCase();
+  return !!message && message.includes('not a git repository');
+}
+
 function statusKey(cwd: string) {
   return ['git-status', cwd] as const;
 }
 
+function useAppVisibility() {
+  const [isVisible, setIsVisible] = useState(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      return document.visibilityState !== 'hidden';
+    }
+    return AppState.currentState === 'active';
+  });
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const handleVisibilityChange = () => {
+        setIsVisible(document.visibilityState !== 'hidden');
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      handleVisibilityChange();
+
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      setIsVisible(nextState === 'active');
+    });
+
+    setIsVisible(AppState.currentState === 'active');
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  return isVisible;
+}
+
+type GitStatusData = {
+  branch: string;
+  is_clean: boolean;
+  staged: Array<{ path: string; status: string }>;
+  unstaged: Array<{ path: string; status: string }>;
+  untracked: Array<string>;
+  ahead: number;
+  behind: number;
+};
+
 export function useGitStatus(cwd: string | null) {
   const queryClient = useQueryClient();
+  const isAppVisible = useAppVisibility();
+  const wasAppVisible = useRef(isAppVisible);
 
   const query = useQuery({
     queryKey: statusKey(cwd ?? ''),
     queryFn: async () => {
       const result = await gitStatus({ query: { cwd: cwd! } });
-      if (result.error) throw new Error('Failed to fetch git status');
-      return extract<{
-        branch: string;
-        is_clean: boolean;
-        staged: Array<{ path: string; status: string }>;
-        unstaged: Array<{ path: string; status: string }>;
-        untracked: Array<string>;
-        ahead: number;
-        behind: number;
-      }>(result.data);
+      if (result.error) {
+        if (isNotGitRepoError(result.error)) {
+          return null;
+        }
+
+        throw new Error(
+          extractErrorMessage(result.error) ?? 'Failed to fetch git status',
+        );
+      }
+
+      const payload = extract<GitStatusData>(result.data);
+      if (!payload) {
+        throw new Error('Failed to fetch git status');
+      }
+
+      return payload;
     },
     enabled: !!cwd,
-    refetchInterval: 10_000,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) => {
+      if (!isAppVisible) return false;
+      if (query.state.status === 'error') return false;
+      if (query.state.data === null) return false;
+      return 10_000;
+    },
   });
+
+  useEffect(() => {
+    if (!cwd) {
+      wasAppVisible.current = isAppVisible;
+      return;
+    }
+
+    const becameVisible = isAppVisible && !wasAppVisible.current;
+    wasAppVisible.current = isAppVisible;
+
+    if (!becameVisible) return;
+
+    const cached = queryClient.getQueryData<GitStatusData | null>(statusKey(cwd));
+    if (cached) {
+      queryClient.invalidateQueries({ queryKey: statusKey(cwd) });
+    }
+  }, [cwd, isAppVisible, queryClient]);
+
+  const isGitRepo = query.status === 'success' && query.data != null;
+  const isNotGitRepo = query.status === 'success' && query.data === null;
 
   const invalidate = useCallback(() => {
     if (cwd) queryClient.invalidateQueries({ queryKey: statusKey(cwd) });
@@ -82,9 +184,12 @@ export function useGitStatus(cwd: string | null) {
   });
 
   return {
-    data: query.data,
+    data: query.data ?? undefined,
     isLoading: query.isLoading,
     isRefetching: query.isRefetching,
+    isGitRepo,
+    isNotGitRepo,
+    error: query.error instanceof Error ? query.error : null,
     stage: stageMutation.mutateAsync,
     unstage: unstageMutation.mutateAsync,
     discard: discardMutation.mutateAsync,

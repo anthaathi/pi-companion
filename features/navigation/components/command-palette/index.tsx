@@ -26,6 +26,7 @@ import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useWorkspaceStore } from '@/features/workspace/store';
 import { useCreateSession } from '@/features/agent/hooks/use-agent-session';
+import { requestBrowserNotificationPermission } from '@/features/agent/browser-notifications';
 
 interface CommandPaletteProps {
   visible: boolean;
@@ -68,7 +69,6 @@ export function CommandPalette({ visible, onClose }: CommandPaletteProps) {
   const textDim = isDark ? '#888' : '#999';
   const hoverBg = isDark ? '#2a2a2a' : '#F0F0F0';
   const selectedBg = isDark ? '#333' : '#E8E8E8';
-  const inputBg = isDark ? '#151515' : '#F6F6F6';
 
   const commands: CommandItem[] = [
     // Workspaces
@@ -93,6 +93,7 @@ export function CommandPalette({ visible, onClose }: CommandPaletteProps) {
       section: 'Actions',
       onSelect: async () => {
         if (!selectedWorkspaceId || createSessionMutation.isPending) return;
+        requestBrowserNotificationPermission();
         handleClose();
         try {
           const info = await createSessionMutation.mutateAsync({
@@ -185,6 +186,16 @@ export function CommandPalette({ visible, onClose }: CommandPaletteProps) {
 
   const flatItems = filtered;
 
+  const handleClose = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(overlayAnim, { toValue: 0, duration: 120, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 0.96, duration: 120, useNativeDriver: true }),
+    ]).start(() => {
+      setSearch('');
+      onClose();
+    });
+  }, [onClose, overlayAnim, scaleAnim]);
+
   useEffect(() => {
     setSelectedIndex(0);
   }, [search]);
@@ -213,7 +224,7 @@ export function CommandPalette({ visible, onClose }: CommandPaletteProps) {
       ]).start();
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [visible]);
+  }, [visible, overlayAnim, scaleAnim]);
 
   // Keyboard shortcut (Ctrl+P / Cmd+P)
   useEffect(() => {
@@ -228,17 +239,7 @@ export function CommandPalette({ visible, onClose }: CommandPaletteProps) {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [visible]);
-
-  const handleClose = useCallback(() => {
-    Animated.parallel([
-      Animated.timing(overlayAnim, { toValue: 0, duration: 120, useNativeDriver: true }),
-      Animated.timing(scaleAnim, { toValue: 0.96, duration: 120, useNativeDriver: true }),
-    ]).start(() => {
-      setSearch('');
-      onClose();
-    });
-  }, [onClose]);
+  }, [visible, handleClose]);
 
   const handleKeyPress = useCallback(
     (e: any) => {
@@ -385,10 +386,7 @@ const styles = StyleSheet.create({
     borderWidth: 0.633,
     overflow: 'hidden',
     maxHeight: 420,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
+    boxShadow: '0px 8px 24px rgba(0, 0, 0, 0.15)',
     elevation: 8,
   },
   searchRow: {

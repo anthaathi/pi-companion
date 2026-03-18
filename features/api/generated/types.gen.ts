@@ -58,6 +58,11 @@ export type AgentPromptRequest = {
     streaming_behavior?: string | null;
 };
 
+export type AgentSessionCommandResponse = {
+    result: unknown;
+    session: AgentSessionInfo;
+};
+
 export type AgentSessionIdRequest = {
     session_id: string;
 };
@@ -101,6 +106,13 @@ export type AgentSetThinkingRequest = {
 export type AgentSwitchSessionRequest = {
     sessionPath: string;
     session_id: string;
+};
+
+export type AuthTokensResponse = {
+    access_expires_at: string;
+    access_token: string;
+    refresh_expires_at: string;
+    refresh_token: string;
 };
 
 export type CreateAgentSessionRequest = {
@@ -257,9 +269,8 @@ export type LoginRequest = {
     username: string;
 };
 
-export type LoginResponse = {
-    expires_at: string;
-    token: string;
+export type LogoutRequest = {
+    refresh_token?: string | null;
 };
 
 export type OperationLog = {
@@ -295,14 +306,13 @@ export type PairRequest = {
     qr_id: string;
 };
 
-export type PairResponse = {
-    expires_at: string;
-    token: string;
-};
-
 export type PathCompletion = {
     is_dir: boolean;
     path: string;
+};
+
+export type RefreshRequest = {
+    refresh_token: string;
 };
 
 export type SessionDetail = {
@@ -329,9 +339,11 @@ export type SessionHeader = {
 };
 
 export type SessionInfo = {
+    access_expires_at: string;
+    access_token: string;
     created_at: string;
-    expires_at: string;
-    token: string;
+    refresh_expires_at: string;
+    refresh_token: string;
     username: string;
 };
 
@@ -360,6 +372,7 @@ export type StreamEvent = {
     session_id: string;
     timestamp: number;
     type: string;
+    workspace_id: string;
 };
 
 export type TouchAgentSessionRequest = {
@@ -749,8 +762,10 @@ export type NewSessionResponses = {
     /**
      * New session started within pi
      */
-    200: unknown;
+    200: AgentSessionCommandResponse;
 };
+
+export type NewSessionResponse = NewSessionResponses[keyof NewSessionResponses];
 
 export type PromptData = {
     body: AgentPromptRequest;
@@ -1101,8 +1116,10 @@ export type SwitchSessionResponses = {
     /**
      * Session switched
      */
-    200: unknown;
+    200: AgentSessionCommandResponse;
 };
+
+export type SwitchSessionResponse = SwitchSessionResponses[keyof SwitchSessionResponses];
 
 export type LoginData = {
     body: LoginRequest;
@@ -1124,13 +1141,13 @@ export type LoginResponses = {
     /**
      * Login successful
      */
-    200: LoginResponse;
+    200: AuthTokensResponse;
 };
 
-export type LoginResponse2 = LoginResponses[keyof LoginResponses];
+export type LoginResponse = LoginResponses[keyof LoginResponses];
 
 export type LogoutData = {
-    body?: never;
+    body?: null | LogoutRequest;
     path?: never;
     query?: never;
     url: '/api/auth/logout';
@@ -1178,12 +1195,37 @@ export type PairError = PairErrors[keyof PairErrors];
 
 export type PairResponses = {
     /**
-     * Pairing accepted, session token returned
+     * Pairing accepted, auth tokens returned
      */
-    200: PairResponse;
+    200: AuthTokensResponse;
 };
 
-export type PairResponse2 = PairResponses[keyof PairResponses];
+export type PairResponse = PairResponses[keyof PairResponses];
+
+export type RefreshData = {
+    body: RefreshRequest;
+    path?: never;
+    query?: never;
+    url: '/api/auth/refresh';
+};
+
+export type RefreshErrors = {
+    /**
+     * Refresh token invalid or expired
+     */
+    401: ErrorBody;
+};
+
+export type RefreshError = RefreshErrors[keyof RefreshErrors];
+
+export type RefreshResponses = {
+    /**
+     * Tokens refreshed
+     */
+    200: AuthTokensResponse;
+};
+
+export type RefreshResponse = RefreshResponses[keyof RefreshResponses];
 
 export type CheckSessionData = {
     body?: never;

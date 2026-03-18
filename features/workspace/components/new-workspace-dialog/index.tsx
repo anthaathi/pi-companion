@@ -283,7 +283,6 @@ export function NewWorkspaceDialog({ visible, onClose }: NewWorkspaceDialogProps
               {
                 backgroundColor: popoverBg,
                 borderColor: inputBorder,
-                shadowColor: '#000',
               },
             ]}
           >
@@ -493,10 +492,7 @@ const styles = StyleSheet.create({
     maxWidth: 440,
     borderRadius: 14,
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 24,
+    boxShadow: '0px 8px 24px rgba(0, 0, 0, 0.2)',
     elevation: 10,
   },
   header: {
@@ -562,9 +558,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 0.633,
     overflow: 'hidden',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
+    boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.12)',
     elevation: 8,
     zIndex: 20,
   },
@@ -573,9 +567,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 0.633,
     overflow: 'hidden',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
+    boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.12)',
     elevation: 8,
   },
   suggestionsScroll: {

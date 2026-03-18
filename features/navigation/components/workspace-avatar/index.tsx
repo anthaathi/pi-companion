@@ -77,7 +77,7 @@ export function WorkspaceAvatar({
           </View>
         </Pressable>
 
-        {hasNotification && !isActive && (
+        {hasNotification && (
           <View style={[styles.dotRing, { backgroundColor: colors.background }]}>
             <View style={[styles.dotInner, { backgroundColor: colors.notificationDot }]} />
           </View>

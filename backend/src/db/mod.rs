@@ -1,9 +1,18 @@
-use chrono::{Duration, Utc};
-use rusqlite::{Connection, params};
+use chrono::{DateTime, Duration, Utc};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::models::{OperationLog, Workspace, WorkspaceStatus};
+
+#[derive(Debug, Clone)]
+pub struct AuthSessionRecord {
+    pub id: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub access_expires_at: DateTime<Utc>,
+    pub refresh_expires_at: DateTime<Utc>,
+}
 
 pub struct Database {
     conn: Mutex<Connection>,
@@ -30,6 +39,16 @@ impl Database {
                 expires_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                access_token TEXT NOT NULL UNIQUE,
+                refresh_token TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                access_expires_at TEXT NOT NULL,
+                refresh_expires_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS operation_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 operation TEXT NOT NULL,
@@ -54,26 +73,84 @@ impl Database {
         Ok(())
     }
 
-    pub fn create_session(&self, username: &str, ttl_hours: u64) -> anyhow::Result<(String, String)> {
-        let conn = self.conn.lock().unwrap();
-        let token = Uuid::new_v4().to_string();
-        let now = Utc::now();
-        let expires_at = now + Duration::hours(ttl_hours as i64);
-        let created_str = now.to_rfc3339();
-        let expires_str = expires_at.to_rfc3339();
-
-        conn.execute(
-            "INSERT INTO sessions (token, username, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
-            params![token, username, created_str, expires_str],
-        )?;
-        Ok((token, expires_str))
+    fn parse_rfc3339_utc(value: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
+        Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc))
     }
 
-    pub fn validate_session(&self, token: &str) -> anyhow::Result<Option<String>> {
+    fn row_to_auth_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthSessionRecord> {
+        let access_expires_at: String = row.get(3)?;
+        let refresh_expires_at: String = row.get(4)?;
+
+        Ok(AuthSessionRecord {
+            id: row.get(0)?,
+            access_token: row.get(1)?,
+            refresh_token: row.get(2)?,
+            access_expires_at: Self::parse_rfc3339_utc(&access_expires_at).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Text,
+                    Box::new(err),
+                )
+            })?,
+            refresh_expires_at: Self::parse_rfc3339_utc(&refresh_expires_at).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    4,
+                    rusqlite::types::Type::Text,
+                    Box::new(err),
+                )
+            })?,
+        })
+    }
+
+    pub fn create_auth_session(
+        &self,
+        username: &str,
+        access_ttl_minutes: u64,
+        refresh_ttl_days: u64,
+    ) -> anyhow::Result<AuthSessionRecord> {
+        let conn = self.conn.lock().unwrap();
+        let session_id = Uuid::new_v4().to_string();
+        let access_token = Uuid::new_v4().to_string();
+        let refresh_token = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let access_expires_at = now + Duration::minutes(access_ttl_minutes as i64);
+        let refresh_expires_at = now + Duration::days(refresh_ttl_days as i64);
+
+        conn.execute(
+            "INSERT INTO auth_sessions (
+                id,
+                username,
+                access_token,
+                refresh_token,
+                created_at,
+                access_expires_at,
+                refresh_expires_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                session_id,
+                username,
+                access_token,
+                refresh_token,
+                now.to_rfc3339(),
+                access_expires_at.to_rfc3339(),
+                refresh_expires_at.to_rfc3339(),
+            ],
+        )?;
+
+        Ok(AuthSessionRecord {
+            id: session_id,
+            access_token,
+            refresh_token,
+            access_expires_at,
+            refresh_expires_at,
+        })
+    }
+
+    pub fn validate_access_token(&self, token: &str) -> anyhow::Result<Option<String>> {
         let conn = self.conn.lock().unwrap();
         let now = Utc::now().to_rfc3339();
         let result = conn.query_row(
-            "SELECT username FROM sessions WHERE token = ?1 AND expires_at > ?2",
+            "SELECT username FROM auth_sessions WHERE access_token = ?1 AND access_expires_at > ?2",
             params![token, now],
             |row| row.get::<_, String>(0),
         );
@@ -84,9 +161,72 @@ impl Database {
         }
     }
 
-    pub fn delete_session(&self, token: &str) -> anyhow::Result<()> {
+    pub fn rotate_auth_session(
+        &self,
+        refresh_token: &str,
+        access_ttl_minutes: u64,
+        refresh_ttl_days: u64,
+    ) -> anyhow::Result<Option<AuthSessionRecord>> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let now = Utc::now();
+        let session = tx
+            .query_row(
+                "SELECT id, access_token, refresh_token, access_expires_at, refresh_expires_at
+                 FROM auth_sessions
+                 WHERE refresh_token = ?1 AND refresh_expires_at > ?2",
+                params![refresh_token, now.to_rfc3339()],
+                Self::row_to_auth_session,
+            )
+            .optional()?;
+
+        let Some(mut session) = session else {
+            tx.commit()?;
+            return Ok(None);
+        };
+
+        let next_access_token = Uuid::new_v4().to_string();
+        let next_refresh_token = Uuid::new_v4().to_string();
+        let next_access_expires_at = now + Duration::minutes(access_ttl_minutes as i64);
+        let next_refresh_expires_at = now + Duration::days(refresh_ttl_days as i64);
+
+        tx.execute(
+            "UPDATE auth_sessions
+             SET access_token = ?1, refresh_token = ?2, access_expires_at = ?3, refresh_expires_at = ?4
+             WHERE id = ?5 AND refresh_token = ?6",
+            params![
+                next_access_token,
+                next_refresh_token,
+                next_access_expires_at.to_rfc3339(),
+                next_refresh_expires_at.to_rfc3339(),
+                session.id,
+                refresh_token,
+            ],
+        )?;
+        tx.commit()?;
+
+        session.access_token = next_access_token;
+        session.refresh_token = next_refresh_token;
+        session.access_expires_at = next_access_expires_at;
+        session.refresh_expires_at = next_refresh_expires_at;
+        Ok(Some(session))
+    }
+
+    pub fn revoke_auth_session_by_access_token(&self, token: &str) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM sessions WHERE token = ?1", params![token])?;
+        conn.execute(
+            "DELETE FROM auth_sessions WHERE access_token = ?1",
+            params![token],
+        )?;
+        Ok(())
+    }
+
+    pub fn revoke_auth_session_by_refresh_token(&self, token: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM auth_sessions WHERE refresh_token = ?1",
+            params![token],
+        )?;
         Ok(())
     }
 
@@ -258,5 +398,62 @@ impl Database {
             created_at: row.get(7)?,
             updated_at: row.get(8)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Database;
+
+    #[test]
+    fn rotate_auth_session_invalidates_previous_tokens() {
+        let db = Database::new(":memory:").expect("in-memory db");
+        let session = db
+            .create_auth_session("admin", 15, 30)
+            .expect("create auth session");
+
+        let username = db
+            .validate_access_token(&session.access_token)
+            .expect("validate access token");
+        assert_eq!(username.as_deref(), Some("admin"));
+
+        let rotated = db
+            .rotate_auth_session(&session.refresh_token, 15, 30)
+            .expect("rotate auth session")
+            .expect("rotated session");
+
+        assert_ne!(rotated.access_token, session.access_token);
+        assert_ne!(rotated.refresh_token, session.refresh_token);
+
+        let old_username = db
+            .validate_access_token(&session.access_token)
+            .expect("validate old access token");
+        assert!(old_username.is_none());
+
+        let current_username = db
+            .validate_access_token(&rotated.access_token)
+            .expect("validate rotated access token");
+        assert_eq!(current_username.as_deref(), Some("admin"));
+
+        let second_rotation = db
+            .rotate_auth_session(&session.refresh_token, 15, 30)
+            .expect("second rotation");
+        assert!(second_rotation.is_none());
+    }
+
+    #[test]
+    fn revoke_auth_session_by_refresh_token_removes_access_token() {
+        let db = Database::new(":memory:").expect("in-memory db");
+        let session = db
+            .create_auth_session("admin", 15, 30)
+            .expect("create auth session");
+
+        db.revoke_auth_session_by_refresh_token(&session.refresh_token)
+            .expect("revoke by refresh token");
+
+        let username = db
+            .validate_access_token(&session.access_token)
+            .expect("validate revoked access token");
+        assert!(username.is_none());
     }
 }

@@ -91,15 +91,19 @@ export function AssistantMessage({
   const hasToolCalls =
     !!effectiveToolCalls && effectiveToolCalls.length > 0;
 
+  const shouldAnimate = animateOnMount && !message.isStreaming;
+
   const fadeOpacity = useRef(
-    new RNAnimated.Value(animateOnMount ? 0 : 1),
+    new RNAnimated.Value(shouldAnimate ? 0 : 1),
   ).current;
   const fadeTranslateY = useRef(
-    new RNAnimated.Value(animateOnMount ? 6 : 0),
+    new RNAnimated.Value(shouldAnimate ? 6 : 0),
   ).current;
 
   useEffect(() => {
-    if (!animateOnMount) {
+    if (!shouldAnimate) {
+      fadeOpacity.setValue(1);
+      fadeTranslateY.setValue(0);
       return;
     }
 
@@ -118,7 +122,7 @@ export function AssistantMessage({
 
     animation.start();
     return () => animation.stop();
-  }, [animateOnMount, fadeOpacity, fadeTranslateY]);
+  }, [shouldAnimate, fadeOpacity, fadeTranslateY]);
 
   return (
     <RNAnimated.View

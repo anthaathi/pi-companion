@@ -9,8 +9,7 @@ import {
   View,
   ActivityIndicator,
 } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
-import { X, QrCode, Wifi, Check, AlertCircle } from "lucide-react-native";
+import { X, Wifi, Check, AlertCircle } from "lucide-react-native";
 
 import { Colors, Fonts } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -23,6 +22,7 @@ import { useAuthStore } from "@/features/auth/store";
 import { useServersStore } from "@/features/servers/store";
 import { useWorkspaceStore } from "@/features/workspace/store";
 import { useRouter } from "expo-router";
+import { QrScannerScanPanel } from "./scan-panel";
 
 type Step = "scan" | "pick-ip" | "pairing" | "done" | "error";
 
@@ -38,7 +38,6 @@ export function QrScanner({ visible, onClose, onNeedNewWorkspace }: QrScannerPro
   const isDark = colorScheme === "dark";
   const router = useRouter();
 
-  const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [connectParams, setConnectParams] = useState<ConnectParams | null>(null);
   const [manualUrl, setManualUrl] = useState("");
@@ -119,7 +118,7 @@ export function QrScanner({ visible, onClose, onNeedNewWorkspace }: QrScannerPro
     }
   };
 
-  const handleBarCodeScanned = ({ data }: { data: string }) => {
+  const handleBarCodeScanned = (data: string) => {
     if (scanned) return;
     setScanned(true);
     setError(null);
@@ -278,36 +277,13 @@ export function QrScanner({ visible, onClose, onNeedNewWorkspace }: QrScannerPro
             </Pressable>
           </View>
 
-          {Platform.OS !== "web" && permission?.granted ? (
-            <View style={styles.cameraWrap}>
-              <CameraView
-                style={styles.camera}
-                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-                onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-              />
-              <View style={styles.viewfinder}>
-                <View style={[styles.corner, styles.cornerTL]} />
-                <View style={[styles.corner, styles.cornerTR]} />
-                <View style={[styles.corner, styles.cornerBL]} />
-                <View style={[styles.corner, styles.cornerBR]} />
-              </View>
-            </View>
-          ) : Platform.OS !== "web" && permission && !permission.granted ? (
-            <View style={styles.permissionWrap}>
-              <QrCode size={36} color={textMuted} strokeWidth={1.2} />
-              <Text style={[styles.permissionText, { color: textMuted }]}>
-                Camera access is needed to scan QR codes.
-              </Text>
-              <Pressable
-                onPress={requestPermission}
-                style={[styles.permissionBtn, { backgroundColor: isDark ? "#fefdfd" : "#1a1a1a" }]}
-              >
-                <Text style={[styles.permissionBtnText, { color: isDark ? "#1a1a1a" : "#fff" }]}>
-                  Grant Access
-                </Text>
-              </Pressable>
-            </View>
-          ) : null}
+          <QrScannerScanPanel
+            visible={visible}
+            scanned={scanned}
+            isDark={isDark}
+            textMuted={textMuted}
+            onBarcodeData={handleBarCodeScanned}
+          />
 
           {/* Manual URL entry (always shown, primary on web) */}
           <View style={styles.manualSection}>
@@ -347,9 +323,6 @@ export function QrScanner({ visible, onClose, onNeedNewWorkspace }: QrScannerPro
   );
 }
 
-const CORNER_SIZE = 24;
-const CORNER_WIDTH = 3;
-
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -388,75 +361,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     alignItems: "center",
     justifyContent: "center",
-  },
-  cameraWrap: {
-    height: 260,
-    borderRadius: 10,
-    overflow: "hidden",
-    position: "relative",
-  },
-  camera: {
-    flex: 1,
-  },
-  viewfinder: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  corner: {
-    position: "absolute",
-    width: CORNER_SIZE,
-    height: CORNER_SIZE,
-    borderColor: "#fff",
-  },
-  cornerTL: {
-    top: "25%",
-    left: "20%",
-    borderTopWidth: CORNER_WIDTH,
-    borderLeftWidth: CORNER_WIDTH,
-    borderTopLeftRadius: 4,
-  },
-  cornerTR: {
-    top: "25%",
-    right: "20%",
-    borderTopWidth: CORNER_WIDTH,
-    borderRightWidth: CORNER_WIDTH,
-    borderTopRightRadius: 4,
-  },
-  cornerBL: {
-    bottom: "25%",
-    left: "20%",
-    borderBottomWidth: CORNER_WIDTH,
-    borderLeftWidth: CORNER_WIDTH,
-    borderBottomLeftRadius: 4,
-  },
-  cornerBR: {
-    bottom: "25%",
-    right: "20%",
-    borderBottomWidth: CORNER_WIDTH,
-    borderRightWidth: CORNER_WIDTH,
-    borderBottomRightRadius: 4,
-  },
-  permissionWrap: {
-    height: 200,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-  },
-  permissionText: {
-    fontSize: 14,
-    fontFamily: Fonts.sans,
-    textAlign: "center",
-  },
-  permissionBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 6,
-    marginTop: 4,
-  },
-  permissionBtnText: {
-    fontSize: 13,
-    fontFamily: Fonts.sansSemiBold,
   },
   manualSection: {
     gap: 8,

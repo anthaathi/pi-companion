@@ -9,9 +9,10 @@ mod web;
 use std::io::Write;
 use std::sync::Arc;
 
-use axum::routing::{delete, get, post, any};
+use axum::http::header;
+use axum::routing::{any, delete, get, post};
 use axum::Router;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -33,6 +34,7 @@ const QR_ROTATE_MINUTES: u64 = 5;
         routes::auth::login,
         routes::auth::logout,
         routes::auth::check_session,
+        routes::auth::refresh,
         routes::auth::pair,
         routes::package::status,
         routes::package::install,
@@ -115,7 +117,9 @@ const QR_ROTATE_MINUTES: u64 = 5;
         models::HealthResponse,
         models::VersionResponse,
         models::LoginRequest,
-        models::LoginResponse,
+        models::AuthTokensResponse,
+        models::RefreshRequest,
+        models::LogoutRequest,
         models::SessionInfo,
         models::PackageStatus,
         models::OperationLog,
@@ -126,7 +130,6 @@ const QR_ROTATE_MINUTES: u64 = 5;
         models::CreateWorkspaceRequest,
         models::UpdateWorkspaceRequest,
         models::PairRequest,
-        models::PairResponse,
         models::PathCompletion,
         models::FsEntry,
         models::FsListResponse,
@@ -274,6 +277,7 @@ async fn async_main() -> anyhow::Result<()> {
         .route("/auth/login", post(routes::auth::login))
         .route("/auth/logout", post(routes::auth::logout))
         .route("/auth/session", get(routes::auth::check_session))
+        .route("/auth/refresh", post(routes::auth::refresh))
         .route("/auth/pair", post(routes::auth::pair))
         .route("/package/status", get(routes::package::status))
         .route("/package/install", post(routes::package::install))
@@ -403,6 +407,18 @@ async fn async_main() -> anyhow::Result<()> {
             post(routes::agent::extension_ui_response),
         );
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers([
+            header::ACCEPT,
+            header::AUTHORIZATION,
+            header::CACHE_CONTROL,
+            header::CONTENT_TYPE,
+            header::HeaderName::from_static("last-event-id"),
+            header::HeaderName::from_static("x-requested-with"),
+        ]);
+
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/healthz", get(routes::health::healthz))
@@ -410,7 +426,7 @@ async fn async_main() -> anyhow::Result<()> {
         .nest("/api", api_routes)
         .fallback(any(web::serve_web))
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::permissive())
+        .layer(cors)
         .with_state(state);
 
     let rotate_pairing = pairing.clone();
@@ -482,7 +498,9 @@ fn run_init() -> anyhow::Result<()> {
         auth: config::AuthConfig {
             username,
             password_hash: hash,
-            session_ttl_hours: 24,
+            access_token_ttl_minutes: 15,
+            refresh_token_ttl_days: 30,
+            session_ttl_hours: None,
         },
         package: config::PackageConfig {
             name: "@mariozechner/pi-coding-agent".to_string(),

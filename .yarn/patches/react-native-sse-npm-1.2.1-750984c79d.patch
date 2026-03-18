@@ -1,0 +1,20 @@
+diff --git a/src/EventSource.js b/src/EventSource.js
+index 6a7b146ef5872f72eda3eb52c265abb996fd7014..32a39bb9a3f73578dd2d3184ff2ae6343f3a7fe0 100644
+--- a/src/EventSource.js
++++ b/src/EventSource.js
+@@ -118,6 +118,15 @@ class EventSource {
+             this._logDebug('[EventSource][onreadystatechange][DONE] Operation done.');
+             this._pollAgain(this.interval, false);
+           }
++        } else if (xhr.status === 0 && xhr.readyState === XMLHttpRequest.DONE) {
++          this._logDebug('[EventSource][onreadystatechange][NETWORK_ERROR] Connection lost (status 0, readyState DONE).');
++          this.status = this.ERROR;
++          this.dispatch('error', {
++            type: 'error',
++            message: 'Network request failed',
++            xhrStatus: 0,
++            xhrState: xhr.readyState,
++          });
+         } else if (xhr.status !== 0) {
+           this.status = this.ERROR;
+           this.dispatch('error', {

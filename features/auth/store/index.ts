@@ -3,55 +3,197 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 import { client } from '@/features/api/generated/client.gen';
-import { login as apiLogin, logout as apiLogout, checkSession, pair as apiPair } from '@/features/api/generated/sdk.gen';
+import type { AuthTokensResponse } from '@/features/api/generated';
+import {
+  checkSession,
+  login as apiLogin,
+  logout as apiLogout,
+  pair as apiPair,
+  refresh as apiRefresh,
+} from '@/features/api/generated/sdk.gen';
 import { unwrapApiData } from '@/features/api/unwrap';
-import type { Server } from '@/features/servers/store';
+import { useServersStore, type Server } from '@/features/servers/store';
 
 const TOKENS_KEY = 'auth_tokens';
 const ACTIVE_SERVER_KEY = 'auth_active_server';
-const DEBUG_ROUTES = ['/api/auth/pair', '/api/auth/session', '/api/workspaces'];
+const DEBUG_ROUTES = [
+  '/api/auth/pair',
+  '/api/auth/refresh',
+  '/api/auth/session',
+  '/api/workspaces',
+];
+const RETRY_EXCLUDED_ROUTES = [
+  '/api/auth/login',
+  '/api/auth/logout',
+  '/api/auth/pair',
+  '/api/auth/refresh',
+];
+const REFRESH_SKEW_MS = 60_000;
+
+let clientAuthInitialized = false;
+let configuredServerId: string | null = null;
+const refreshInFlight = new Map<string, Promise<AuthSessionBundle | null>>();
+
+export interface AuthSessionBundle {
+  accessToken: string;
+  refreshToken: string;
+  accessExpiresAt: string;
+  refreshExpiresAt: string;
+}
+
+interface StoredAuthState {
+  tokens: Record<string, AuthSessionBundle>;
+  activeServerId: string | null;
+  migrated: boolean;
+}
 
 interface AuthState {
-  /** serverId → token */
-  tokens: Record<string, string>;
+  tokens: Record<string, AuthSessionBundle>;
   activeServerId: string | null;
   loaded: boolean;
 
   load: () => Promise<void>;
-  /** Login to a server with credentials, stores the token keyed by server id */
   loginToServer: (server: Server) => Promise<{ success: boolean; error?: string }>;
-  /** Pair with a server via QR code. Calls POST /api/auth/pair, waits for operator to accept. */
-  pairWithServer: (baseUrl: string, qrId: string, serverId: string) => Promise<{ success: boolean; error?: string }>;
-  /** Logout from a specific server (removes its token) */
+  pairWithServer: (
+    baseUrl: string,
+    qrId: string,
+    serverId: string,
+  ) => Promise<{ success: boolean; error?: string }>;
   logoutFromServer: (serverId: string) => Promise<void>;
-  /** Switch the active server, verify session, configure the API client. Returns false if session is invalid. */
   activateServer: (server: Server) => Promise<boolean>;
-  /** Check if a server has a stored token */
   hasToken: (serverId: string) => boolean;
+  refreshServerSession: (serverId: string) => Promise<AuthSessionBundle | null>;
+  refreshActiveServerSession: () => Promise<boolean>;
+  clearServerSession: (serverId: string) => Promise<void>;
 }
 
-async function readStore(): Promise<{ tokens: Record<string, string>; activeServerId: string | null }> {
+function formatTokenDebug(token: string | null | undefined) {
+  if (!token) return 'none';
+  return `${token.slice(0, 8)}... len=${token.length}`;
+}
+
+function formatSessionDebug(session: AuthSessionBundle | null | undefined) {
+  if (!session) return 'none';
+  return `access=${formatTokenDebug(session.accessToken)} refresh=${formatTokenDebug(session.refreshToken)} accessExp=${session.accessExpiresAt} refreshExp=${session.refreshExpiresAt}`;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isAuthSessionBundle(value: unknown): value is AuthSessionBundle {
+  if (!isObjectRecord(value)) return false;
+  return (
+    typeof value.accessToken === 'string' &&
+    typeof value.refreshToken === 'string' &&
+    typeof value.accessExpiresAt === 'string' &&
+    typeof value.refreshExpiresAt === 'string'
+  );
+}
+
+function normalizeStoredSessions(raw: unknown): {
+  tokens: Record<string, AuthSessionBundle>;
+  migrated: boolean;
+} {
+  if (!isObjectRecord(raw)) {
+    return { tokens: {}, migrated: raw !== null && raw !== undefined };
+  }
+
+  const tokens: Record<string, AuthSessionBundle> = {};
+  let migrated = false;
+
+  for (const [serverId, value] of Object.entries(raw)) {
+    if (isAuthSessionBundle(value)) {
+      tokens[serverId] = value;
+      continue;
+    }
+    migrated = true;
+  }
+
+  return { tokens, migrated };
+}
+
+function toAuthSessionBundle(value: unknown): AuthSessionBundle | null {
+  const data = unwrapApiData<AuthTokensResponse>(
+    value as AuthTokensResponse | null | undefined,
+  );
+  if (
+    !data?.access_token ||
+    !data.refresh_token ||
+    !data.access_expires_at ||
+    !data.refresh_expires_at
+  ) {
+    return null;
+  }
+
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    accessExpiresAt: data.access_expires_at,
+    refreshExpiresAt: data.refresh_expires_at,
+  };
+}
+
+function parseExpiresAt(value: string) {
+  const expiresAt = Date.parse(value);
+  return Number.isFinite(expiresAt) ? expiresAt : 0;
+}
+
+function isAccessTokenNearExpiry(session: AuthSessionBundle) {
+  return parseExpiresAt(session.accessExpiresAt) - Date.now() <= REFRESH_SKEW_MS;
+}
+
+function isRefreshTokenExpired(session: AuthSessionBundle) {
+  return parseExpiresAt(session.refreshExpiresAt) <= Date.now();
+}
+
+function extractErrorMessage(error: unknown, fallback: string) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'error' in error &&
+    typeof (error as { error?: unknown }).error === 'string'
+  ) {
+    return (error as { error: string }).error;
+  }
+  return fallback;
+}
+
+async function readStore(): Promise<StoredAuthState> {
   try {
     if (Platform.OS === 'web') {
       const rawTokens = localStorage.getItem(TOKENS_KEY);
       const activeServerId = localStorage.getItem(ACTIVE_SERVER_KEY);
+      const normalized = normalizeStoredSessions(
+        rawTokens ? JSON.parse(rawTokens) : {},
+      );
       return {
-        tokens: rawTokens ? JSON.parse(rawTokens) : {},
-        activeServerId,
+        tokens: normalized.tokens,
+        activeServerId:
+          activeServerId && normalized.tokens[activeServerId]
+            ? activeServerId
+            : null,
+        migrated: normalized.migrated || (!!activeServerId && !normalized.tokens[activeServerId]),
       };
     }
+
     const rawTokens = await SecureStore.getItemAsync(TOKENS_KEY);
     const activeServerId = await SecureStore.getItemAsync(ACTIVE_SERVER_KEY);
+    const normalized = normalizeStoredSessions(rawTokens ? JSON.parse(rawTokens) : {});
     return {
-      tokens: rawTokens ? JSON.parse(rawTokens) : {},
-      activeServerId,
+      tokens: normalized.tokens,
+      activeServerId:
+        activeServerId && normalized.tokens[activeServerId]
+          ? activeServerId
+          : null,
+      migrated: normalized.migrated || (!!activeServerId && !normalized.tokens[activeServerId]),
     };
   } catch {
-    return { tokens: {}, activeServerId: null };
+    return { tokens: {}, activeServerId: null, migrated: true };
   }
 }
 
-async function writeTokens(tokens: Record<string, string>) {
+async function writeTokens(tokens: Record<string, AuthSessionBundle>) {
   try {
     const json = JSON.stringify(tokens);
     if (Platform.OS === 'web') {
@@ -74,179 +216,388 @@ async function writeActiveServerId(serverId: string | null) {
   } catch {}
 }
 
-function formatTokenDebug(token: string | null | undefined) {
-  if (!token) return 'none';
-  return `${token.slice(0, 8)}... len=${token.length}`;
+function findServer(serverId: string) {
+  return useServersStore
+    .getState()
+    .servers.find((server) => server.id === serverId);
 }
 
-client.setConfig({
-  requestValidator: async (value) => {
-    const request = value as {
-      method?: string;
-      url?: string;
-      baseUrl?: string;
-      auth?: unknown;
-      headers?: Headers;
-    };
-    const fullUrl = `${request.baseUrl ?? ''}${request.url ?? ''}`;
-    if (!DEBUG_ROUTES.some((route) => fullUrl.includes(route))) {
-      return;
+function currentConfiguredAccessToken() {
+  if (!configuredServerId) {
+    return undefined;
+  }
+  return useAuthStore.getState().tokens[configuredServerId]?.accessToken;
+}
+
+function configureClient(serverId: string | null, baseUrl?: string) {
+  configuredServerId = serverId;
+  console.log(
+    `[auth] configureClient serverId=${serverId ?? 'none'} baseUrl=${baseUrl ?? 'none'} token=${formatTokenDebug(
+      currentConfiguredAccessToken(),
+    )}`,
+  );
+  client.setConfig({ baseUrl, auth: async () => currentConfiguredAccessToken() });
+}
+
+function currentRequestPath(requestUrl: string, path?: string) {
+  if (path) {
+    return path;
+  }
+
+  try {
+    return new URL(requestUrl).pathname;
+  } catch {
+    return requestUrl;
+  }
+}
+
+export const useAuthStore = create<AuthState>((set, get) => {
+  async function persistAuthState(
+    tokens: Record<string, AuthSessionBundle>,
+    activeServerId: string | null,
+  ) {
+    await writeTokens(tokens);
+    await writeActiveServerId(activeServerId);
+  }
+
+  async function applySessionBundle(
+    serverId: string,
+    session: AuthSessionBundle,
+    options: { activeServerId?: string | null; baseUrl?: string } = {},
+  ) {
+    const tokens = { ...get().tokens, [serverId]: session };
+    const activeServerId =
+      options.activeServerId !== undefined
+        ? options.activeServerId
+        : get().activeServerId;
+
+    set({ tokens, activeServerId });
+    await persistAuthState(tokens, activeServerId);
+
+    if (options.baseUrl) {
+      configureClient(serverId, options.baseUrl);
     }
+  }
 
-    const authHeader = request.headers?.get('Authorization');
-    const authConfig =
-      typeof request.auth === 'string'
-        ? formatTokenDebug(request.auth.replace(/^Bearer\s+/i, ''))
-        : request.auth
-          ? '[auth-callback]'
-          : 'none';
+  async function removeServerSession(
+    serverId: string,
+    nextActiveServerId: string | null = get().activeServerId === serverId
+      ? null
+      : get().activeServerId,
+  ) {
+    const { [serverId]: _removed, ...tokens } = get().tokens;
+    set({ tokens, activeServerId: nextActiveServerId });
+    await persistAuthState(tokens, nextActiveServerId);
 
-    console.log(
-      `[req] ${request.method ?? 'GET'} ${fullUrl} authHeader=${formatTokenDebug(
-        authHeader?.replace(/^Bearer\s+/i, ''),
-      )} configAuth=${authConfig}`,
-    );
-  },
+    if (configuredServerId === serverId) {
+      if (nextActiveServerId) {
+        const nextServer = findServer(nextActiveServerId);
+        configureClient(nextActiveServerId, nextServer?.address);
+      } else {
+        configureClient(null, undefined);
+      }
+    }
+  }
+
+  return {
+    tokens: {},
+    activeServerId: null,
+    loaded: false,
+
+    load: async () => {
+      const { tokens, activeServerId, migrated } = await readStore();
+      set({ tokens, activeServerId, loaded: true });
+
+      if (migrated) {
+        await persistAuthState(tokens, activeServerId);
+      }
+    },
+
+    loginToServer: async (server: Server) => {
+      const result = await apiLogin({
+        baseUrl: server.address,
+        body: {
+          username: server.username,
+          password: server.password,
+        },
+      });
+
+      if (result.error) {
+        return {
+          success: false,
+          error: extractErrorMessage(result.error, 'Login failed'),
+        };
+      }
+
+      const session = toAuthSessionBundle(result.data);
+      console.log(`[loginToServer] response session=${formatSessionDebug(session)}`);
+      if (!session) {
+        return { success: false, error: 'Login tokens missing from response' };
+      }
+
+      await applySessionBundle(server.id, session, {
+        activeServerId: server.id,
+        baseUrl: server.address,
+      });
+
+      return { success: true };
+    },
+
+    pairWithServer: async (baseUrl: string, qrId: string, serverId: string) => {
+      const result = await apiPair({
+        baseUrl,
+        body: { qr_id: qrId },
+      });
+
+      if (result.error) {
+        return {
+          success: false,
+          error: extractErrorMessage(result.error, 'Pairing failed'),
+        };
+      }
+
+      const session = toAuthSessionBundle(result.data);
+      console.log(`[pairWithServer] response session=${formatSessionDebug(session)}`);
+      if (!session) {
+        return { success: false, error: 'Pairing tokens missing from response' };
+      }
+
+      await applySessionBundle(serverId, session, {
+        activeServerId: serverId,
+        baseUrl,
+      });
+
+      return { success: true };
+    },
+
+    logoutFromServer: async (serverId: string) => {
+      const session = get().tokens[serverId];
+      const server = findServer(serverId);
+
+      if (session && server) {
+        try {
+          await apiLogout({
+            baseUrl: server.address,
+            body: { refresh_token: session.refreshToken },
+            headers: session.accessToken
+              ? { Authorization: `Bearer ${session.accessToken}` }
+              : undefined,
+          });
+        } catch {
+          // Best-effort logout. Local session is always cleared below.
+        }
+      }
+
+      await removeServerSession(serverId);
+    },
+
+    activateServer: async (server: Server) => {
+      const session = get().tokens[server.id];
+      if (!session) return false;
+
+      const previousConfiguredServerId = configuredServerId;
+      const previousConfiguredServer = previousConfiguredServerId
+        ? findServer(previousConfiguredServerId)
+        : null;
+
+      configureClient(server.id, server.address);
+
+      if (isRefreshTokenExpired(session)) {
+        await removeServerSession(server.id, get().activeServerId === server.id ? null : get().activeServerId);
+        if (previousConfiguredServerId && previousConfiguredServerId !== server.id) {
+          configureClient(previousConfiguredServerId, previousConfiguredServer?.address);
+        }
+        return false;
+      }
+
+      if (isAccessTokenNearExpiry(session)) {
+        const refreshed = await get().refreshServerSession(server.id);
+        if (!refreshed) {
+          if (previousConfiguredServerId && previousConfiguredServerId !== server.id) {
+            configureClient(previousConfiguredServerId, previousConfiguredServer?.address);
+          } else if (previousConfiguredServerId !== server.id) {
+            configureClient(null, undefined);
+          }
+          return false;
+        }
+      }
+
+      const result = await checkSession();
+      if (result.error) {
+        const status = result.response?.status ?? 0;
+        if (status === 401 || status === 403) {
+          await removeServerSession(
+            server.id,
+            get().activeServerId === server.id ? null : get().activeServerId,
+          );
+        } else if (previousConfiguredServerId && previousConfiguredServerId !== server.id) {
+          configureClient(previousConfiguredServerId, previousConfiguredServer?.address);
+        } else if (previousConfiguredServerId !== server.id) {
+          configureClient(null, undefined);
+        }
+        return false;
+      }
+
+      set({ activeServerId: server.id });
+      await writeActiveServerId(server.id);
+      return true;
+    },
+
+    hasToken: (serverId: string) => {
+      return !!get().tokens[serverId];
+    },
+
+    refreshServerSession: async (serverId: string) => {
+      const existing = refreshInFlight.get(serverId);
+      if (existing) {
+        return existing;
+      }
+
+      const task = (async () => {
+        const session = get().tokens[serverId];
+        if (!session) {
+          return null;
+        }
+
+        if (isRefreshTokenExpired(session)) {
+          await removeServerSession(serverId);
+          return null;
+        }
+
+        const server = findServer(serverId);
+        if (!server) {
+          await removeServerSession(serverId);
+          return null;
+        }
+
+        console.log(
+          `[auth] refreshServerSession serverId=${serverId} session=${formatSessionDebug(
+            session,
+          )}`,
+        );
+
+        const result = await apiRefresh({
+          baseUrl: server.address,
+          body: { refresh_token: session.refreshToken },
+        });
+
+        if (result.error) {
+          const status = result.response?.status ?? 0;
+          if (status === 401 || status === 403) {
+            await removeServerSession(serverId);
+          }
+          return null;
+        }
+
+        const nextSession = toAuthSessionBundle(result.data);
+        if (!nextSession) {
+          return null;
+        }
+
+        await applySessionBundle(serverId, nextSession, {
+          baseUrl: configuredServerId === serverId ? server.address : undefined,
+        });
+
+        return nextSession;
+      })();
+
+      refreshInFlight.set(serverId, task);
+      try {
+        return await task;
+      } finally {
+        refreshInFlight.delete(serverId);
+      }
+    },
+
+    refreshActiveServerSession: async () => {
+      if (!configuredServerId) {
+        return false;
+      }
+      return !!(await get().refreshServerSession(configuredServerId));
+    },
+
+    clearServerSession: async (serverId: string) => {
+      await removeServerSession(serverId);
+    },
+  };
 });
 
-function setClientAuthToken(token: string | null) {
-  console.log(`[auth] setClientAuthToken token=${formatTokenDebug(token)}`);
-  client.setConfig({ auth: token ?? undefined });
-}
+function initializeClientAuth() {
+  if (clientAuthInitialized) {
+    return;
+  }
+  clientAuthInitialized = true;
 
-function configureClient(baseUrl: string, token: string) {
-  console.log(
-    `[auth] configureClient baseUrl=${baseUrl} token=${formatTokenDebug(token)}`,
-  );
-  setClientAuthToken(token);
-  client.setConfig({ baseUrl });
-}
-
-function clearClientAuth() {
-  setClientAuthToken(null);
-}
-
-export const useAuthStore = create<AuthState>((set, get) => ({
-  tokens: {},
-  activeServerId: null,
-  loaded: false,
-
-  load: async () => {
-    const { tokens, activeServerId } = await readStore();
-    set({ tokens, activeServerId, loaded: true });
-  },
-
-  loginToServer: async (server: Server) => {
-    const result = await apiLogin({
-      baseUrl: server.address,
-      body: {
-        username: server.username,
-        password: server.password,
-      },
-    });
-
-    if (result.error) {
-      return {
-        success: false,
-        error: (result.error as { error?: string })?.error ?? 'Login failed',
+  client.setConfig({
+    auth: async () => currentConfiguredAccessToken(),
+    requestValidator: async (value) => {
+      const request = value as {
+        method?: string;
+        url?: string;
+        baseUrl?: string;
+        auth?: unknown;
+        headers?: Headers;
       };
-    }
-
-    const token = unwrapApiData(result.data)?.token;
-    console.log(`[loginToServer] response token=${formatTokenDebug(token)}`);
-    if (!token) {
-      return { success: false, error: 'Login token missing from response' };
-    }
-    const tokens = { ...get().tokens, [server.id]: token };
-
-    configureClient(server.address, token);
-    set({ tokens, activeServerId: server.id });
-
-    await writeTokens(tokens);
-    await writeActiveServerId(server.id);
-
-    return { success: true };
-  },
-
-  pairWithServer: async (baseUrl: string, qrId: string, serverId: string) => {
-    const result = await apiPair({
-      baseUrl,
-      body: { qr_id: qrId },
-    });
-
-    if (result.error) {
-      const err = result.error as { error?: string };
-      return {
-        success: false,
-        error: err?.error ?? 'Pairing failed',
-      };
-    }
-
-    const token = unwrapApiData(result.data)?.token;
-    console.log(`[pairWithServer] response token=${formatTokenDebug(token)}`);
-    if (!token) {
-      return { success: false, error: 'Pairing token missing from response' };
-    }
-    const tokens = { ...get().tokens, [serverId]: token };
-
-    configureClient(baseUrl, token);
-    set({ tokens, activeServerId: serverId });
-
-    await writeTokens(tokens);
-    await writeActiveServerId(serverId);
-
-    return { success: true };
-  },
-
-  logoutFromServer: async (serverId: string) => {
-    // Call logout API to invalidate the token on the server
-    const token = get().tokens[serverId];
-    if (token) {
-      // Temporarily set the token so the logout request is authenticated
-      const prevAuth = client.getConfig().auth;
-      setClientAuthToken(token);
-      try {
-        await apiLogout();
-      } catch {
-        // Best-effort — still clear locally even if API call fails
+      const fullUrl = `${request.baseUrl ?? ''}${request.url ?? ''}`;
+      if (!DEBUG_ROUTES.some((route) => fullUrl.includes(route))) {
+        return;
       }
-      client.setConfig({ auth: prevAuth });
+
+      const authHeader = request.headers?.get('Authorization');
+      const authConfig =
+        typeof request.auth === 'string'
+          ? formatTokenDebug(request.auth.replace(/^Bearer\s+/i, ''))
+          : request.auth
+            ? '[auth-callback]'
+            : 'none';
+
+      console.log(
+        `[req] ${request.method ?? 'GET'} ${fullUrl} authHeader=${formatTokenDebug(
+          authHeader?.replace(/^Bearer\s+/i, ''),
+        )} configAuth=${authConfig} configuredServerId=${configuredServerId ?? 'none'}`,
+      );
+    },
+  });
+
+  client.interceptors.response.use(async (response, request, opts) => {
+    if (response.status !== 401 || (opts as { _authRetry?: boolean })._authRetry) {
+      return response;
     }
 
-    const { [serverId]: _, ...rest } = get().tokens;
-    const newActiveId = get().activeServerId === serverId ? null : get().activeServerId;
-
-    set({ tokens: rest, activeServerId: newActiveId });
-    await writeTokens(rest);
-    await writeActiveServerId(newActiveId);
-
-    if (newActiveId === null) {
-      clearClientAuth();
-    }
-  },
-
-  activateServer: async (server: Server) => {
-    const token = get().tokens[server.id];
-    if (!token) return false;
-
-    configureClient(server.address, token);
-
-    // Verify the session is still valid
-    const result = await checkSession();
-    if (result.error) {
-      const { [server.id]: _, ...rest } = get().tokens;
-      set({ tokens: rest });
-      await writeTokens(rest);
-      clearClientAuth();
-      return false;
+    const path = currentRequestPath(request.url, opts.url);
+    if (RETRY_EXCLUDED_ROUTES.some((route) => path.includes(route))) {
+      return response;
     }
 
-    set({ activeServerId: server.id });
-    writeActiveServerId(server.id);
-    return true;
-  },
+    const serverId = configuredServerId;
+    if (!serverId) {
+      return response;
+    }
 
-  hasToken: (serverId: string) => {
-    return !!get().tokens[serverId];
-  },
-}));
+    const refreshed = await useAuthStore.getState().refreshServerSession(serverId);
+    if (!refreshed) {
+      return response;
+    }
+
+    const headers = new Headers(request.headers);
+    headers.delete('Authorization');
+    headers.delete('authorization');
+
+    const method =
+      opts.method ??
+      (request.method as NonNullable<typeof opts.method>);
+
+    const retryResult = await (client.request as typeof client.request & ((
+      options: typeof opts & { _authRetry: boolean; method: typeof method }
+    ) => Promise<{ response?: Response }>))({
+      ...opts,
+      _authRetry: true,
+      headers,
+      method,
+    });
+
+    return retryResult.response ?? response;
+  });
+}
+
+initializeClientAuth();

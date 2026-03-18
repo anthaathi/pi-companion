@@ -22,6 +22,7 @@ const SHUTDOWN_GRACE_SECS: u64 = 5;
 pub struct StreamEvent {
     pub id: u64,
     pub session_id: String,
+    pub workspace_id: String,
     #[serde(rename = "type")]
     pub event_type: String,
     pub data: Value,
@@ -64,6 +65,7 @@ struct AgentSession {
     cwd: String,
     model: Option<Value>,
     thinking_level: Option<String>,
+    pending_extension_ui_request: Option<Value>,
     process: Option<PiProcess>,
     last_activity: Arc<Mutex<Instant>>,
     resume_lock: Arc<Mutex<()>>,
@@ -208,53 +210,69 @@ impl AgentManager {
         Ok(response)
     }
 
+    pub async fn send_untracked_command(
+        &self,
+        session_id: &str,
+        command: Value,
+    ) -> Result<(), String> {
+        let (resolved_id, stdin, _pending, last_activity) =
+            self.get_or_resume_process(session_id).await?;
+
+        self.emit_event(&resolved_id, "client_command", &command)
+            .await;
+
+        let write_result: Result<(), String> = {
+            let mut stdin_guard = stdin.lock().await;
+            let bytes = command.to_string();
+            stdin_guard
+                .write_all(bytes.as_bytes())
+                .await
+                .map_err(|e| format!("Failed to write to pi stdin: {e}"))?;
+            stdin_guard
+                .write_all(b"\n")
+                .await
+                .map_err(|e| e.to_string())?;
+            stdin_guard.flush().await.map_err(|e| e.to_string())
+        };
+
+        if let Err(err) = write_result {
+            return Err(err);
+        }
+
+        *last_activity.lock().await = Instant::now();
+        Ok(())
+    }
+
     pub async fn refresh_session_state(
         &self,
         session_id: &str,
     ) -> Result<AgentSessionInfo, String> {
-        let (resolved_id, response) = self
-            .send_command_internal(
-                session_id,
-                json!({"type": "get_state"}),
-                false,
-            )
-            .await?;
-
-        if !response["success"].as_bool().unwrap_or(false) {
-            let error = response["error"]
-                .as_str()
-                .unwrap_or("Unknown error");
-            return Err(format!("get_state failed: {error}"));
-        }
-
-        let snapshot = Self::parse_state_response(&response)?;
-        let session_info = {
-            let mut sessions = self.sessions.write().await;
-            let mut session = sessions
-                .remove(&resolved_id)
-                .ok_or("Session not found during state refresh")?;
-
-            session.session_id = snapshot.session_id.clone();
-            session.session_file = snapshot.session_file.clone();
-            session.model = snapshot.model.clone();
-            session.thinking_level = snapshot.thinking_level.clone();
-
-            if let Some(process) = session.process.as_ref() {
-                *process.session_id_ref.lock().unwrap() =
-                    snapshot.session_id.clone();
-            }
-
-            let info = Self::build_session_info(&session);
-            sessions.insert(snapshot.session_id.clone(), session);
-            info
-        };
-
-        if resolved_id != snapshot.session_id {
-            self.repoint_aliases(&resolved_id, &snapshot.session_id)
-                .await;
-        }
-
+        let (session_info, _) =
+            self.refresh_session_state_with_data(session_id).await?;
         Ok(session_info)
+    }
+
+    pub async fn get_pending_extension_ui_request(
+        &self,
+        session_id: &str,
+    ) -> Option<Value> {
+        let resolved_id = self.resolve_session_id(session_id).await;
+        let sessions = self.sessions.read().await;
+        sessions
+            .get(&resolved_id)
+            .and_then(|session| session.pending_extension_ui_request.clone())
+    }
+
+    pub async fn clear_pending_extension_ui_request(&self, session_id: &str) {
+        let resolved_id = self.resolve_session_id(session_id).await;
+        let mut sessions = self.sessions.write().await;
+        if let Some(session) = sessions.get_mut(&resolved_id) {
+            session.pending_extension_ui_request = None;
+        }
+    }
+
+    pub async fn emit_agent_state(&self, session_id: &str) -> Result<(), String> {
+        self.emit_agent_state_event(session_id).await
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
@@ -416,6 +434,7 @@ impl AgentManager {
         );
 
         let mut cmd = tokio::process::Command::new(pi_bin);
+        cmd.env("PI_OFFLINE", "1");
         cmd.arg("--mode").arg("rpc");
 
         if let Some(ref path) = session_path {
@@ -553,10 +572,6 @@ impl AgentManager {
         let instance_id =
             self.process_counter.fetch_add(1, Ordering::SeqCst);
 
-        for event in initial_events {
-            self.emit_pi_event(&snapshot.session_id, event).await;
-        }
-
         let reader_sessions = self.sessions.clone();
         let reader_pending = pending.clone();
         let reader_broadcast = self.broadcast_tx.clone();
@@ -564,6 +579,52 @@ impl AgentManager {
         let reader_counter = self.event_counter.clone();
         let reader_instance_id = instance_id;
         let reader_session_id = current_session_id.clone();
+        let reader_workspace_id = workspace_id.clone();
+
+        let process = PiProcess {
+            stdin,
+            pending,
+            pid,
+            instance_id,
+            exit_rx,
+            session_id_ref: current_session_id,
+        };
+        let session = AgentSession {
+            session_id: snapshot.session_id.clone(),
+            session_file: snapshot.session_file.clone(),
+            workspace_id: workspace_id.clone(),
+            cwd: cwd.clone(),
+            model: snapshot.model.clone(),
+            thinking_level: snapshot.thinking_level.clone(),
+            pending_extension_ui_request: None,
+            process: Some(process),
+            last_activity: Arc::new(Mutex::new(Instant::now())),
+            resume_lock: resume_lock.unwrap_or_else(|| Arc::new(Mutex::new(()))),
+        };
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(previous_key) = previous_key.as_ref() {
+                sessions.remove(previous_key);
+            }
+            sessions.insert(snapshot.session_id.clone(), session);
+        }
+
+        if let Some(previous_key) = previous_key.as_ref() {
+            if previous_key != &snapshot.session_id {
+                self.repoint_aliases(previous_key, &snapshot.session_id)
+                    .await;
+            }
+        }
+
+        for event in initial_events {
+            Self::update_pending_extension_ui_request(
+                &self.sessions,
+                &snapshot.session_id,
+                &event,
+            )
+            .await;
+            self.emit_pi_event(&snapshot.session_id, event).await;
+        }
 
         tokio::spawn(async move {
             let mut buf_line = line;
@@ -595,14 +656,23 @@ impl AgentManager {
                             }
                         }
 
+                        let current_session_id = reader_session_id
+                            .lock()
+                            .unwrap()
+                            .clone();
+                        Self::update_pending_extension_ui_request(
+                            &reader_sessions,
+                            &current_session_id,
+                            &event,
+                        )
+                        .await;
+
                         let evt_id =
                             reader_counter.fetch_add(1, Ordering::SeqCst);
                         let stream_event = StreamEvent {
                             id: evt_id,
-                            session_id: reader_session_id
-                                .lock()
-                                .unwrap()
-                                .clone(),
+                            session_id: current_session_id,
+                            workspace_id: reader_workspace_id.clone(),
                             event_type: event["type"]
                                 .as_str()
                                 .unwrap_or("unknown")
@@ -644,6 +714,7 @@ impl AgentManager {
             let exit_event = StreamEvent {
                 id: evt_id,
                 session_id: exit_session_id,
+                workspace_id: reader_workspace_id.clone(),
                 event_type: "session_process_exited".to_string(),
                 data: json!({"type": "session_process_exited"}),
                 timestamp: chrono::Utc::now().timestamp_millis(),
@@ -657,40 +728,6 @@ impl AgentManager {
             let _ = reader_broadcast.send(exit_event);
         });
 
-        let process = PiProcess {
-            stdin,
-            pending,
-            pid,
-            instance_id,
-            exit_rx,
-            session_id_ref: current_session_id,
-        };
-        let session = AgentSession {
-            session_id: snapshot.session_id.clone(),
-            session_file: snapshot.session_file.clone(),
-            workspace_id: workspace_id.clone(),
-            cwd: cwd.clone(),
-            model: snapshot.model.clone(),
-            thinking_level: snapshot.thinking_level.clone(),
-            process: Some(process),
-            last_activity: Arc::new(Mutex::new(Instant::now())),
-            resume_lock: resume_lock.unwrap_or_else(|| Arc::new(Mutex::new(()))),
-        };
-        {
-            let mut sessions = self.sessions.write().await;
-            if let Some(previous_key) = previous_key.as_ref() {
-                sessions.remove(previous_key);
-            }
-            sessions.insert(snapshot.session_id.clone(), session);
-        }
-
-        if let Some(previous_key) = previous_key.as_ref() {
-            if previous_key != &snapshot.session_id {
-                self.repoint_aliases(previous_key, &snapshot.session_id)
-                    .await;
-            }
-        }
-
         Ok(AgentSessionInfo {
             session_id: snapshot.session_id,
             session_file: snapshot.session_file,
@@ -703,6 +740,29 @@ impl AgentManager {
     }
 
     async fn send_command_internal(
+        &self,
+        session_id: &str,
+        command: Value,
+        emit_client_event: bool,
+    ) -> Result<(String, Value), String> {
+        let (resolved_id, response) = self
+            .execute_command(session_id, command.clone(), emit_client_event)
+            .await?;
+
+        if Self::should_emit_agent_state(&command, &response) {
+            if let Err(err) = self.emit_agent_state_event(&resolved_id).await {
+                tracing::warn!(
+                    "Failed to emit agent_state after command {}: {}",
+                    command["type"].as_str().unwrap_or("unknown"),
+                    err
+                );
+            }
+        }
+
+        Ok((resolved_id, response))
+    }
+
+    async fn execute_command(
         &self,
         session_id: &str,
         command: Value,
@@ -746,10 +806,13 @@ impl AgentManager {
 
         *last_activity.lock().await = Instant::now();
 
-        match tokio::time::timeout(Duration::from_secs(COMMAND_TIMEOUT_SECS), rx)
+        let response = match tokio::time::timeout(
+            Duration::from_secs(COMMAND_TIMEOUT_SECS),
+            rx,
+        )
             .await
         {
-            Ok(Ok(response)) => Ok((resolved_id, response)),
+            Ok(Ok(response)) => Ok(response),
             Ok(Err(_)) => Err(
                 "Response channel closed (process may have crashed)"
                     .to_string(),
@@ -758,7 +821,9 @@ impl AgentManager {
                 pending.lock().await.remove(&req_id);
                 Err("Command timed out after 5 minutes".to_string())
             }
-        }
+        }?;
+
+        Ok((resolved_id, response))
     }
 
     fn build_session_info(session: &AgentSession) -> AgentSessionInfo {
@@ -794,6 +859,89 @@ impl AgentManager {
             model,
             thinking_level,
         })
+    }
+
+    fn should_emit_agent_state(command: &Value, response: &Value) -> bool {
+        if !response["success"].as_bool().unwrap_or(false) {
+            return false;
+        }
+
+        match command["type"].as_str() {
+            Some("set_steering_mode") | Some("set_follow_up_mode") => true,
+            Some("prompt") | Some("steer") | Some("follow_up") => {
+                command["message"]
+                    .as_str()
+                    .map(Self::is_mode_slash_command)
+                    .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_mode_slash_command(message: &str) -> bool {
+        let first = message.split_whitespace().next().unwrap_or_default();
+        matches!(first, "/plan" | "/chat")
+    }
+
+    async fn emit_agent_state_event(
+        &self,
+        session_id: &str,
+    ) -> Result<(), String> {
+        let (session_info, data) =
+            self.refresh_session_state_with_data(session_id).await?;
+        self.emit_event(&session_info.session_id, "agent_state", &data)
+            .await;
+        Ok(())
+    }
+
+    async fn refresh_session_state_with_data(
+        &self,
+        session_id: &str,
+    ) -> Result<(AgentSessionInfo, Value), String> {
+        let (resolved_id, response) = self
+            .execute_command(
+                session_id,
+                json!({"type": "get_state"}),
+                false,
+            )
+            .await?;
+
+        if !response["success"].as_bool().unwrap_or(false) {
+            let error = response["error"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            return Err(format!("get_state failed: {error}"));
+        }
+
+        let snapshot = Self::parse_state_response(&response)?;
+        let state_data = response.get("data").cloned().unwrap_or(Value::Null);
+        let session_info = {
+            let mut sessions = self.sessions.write().await;
+            let mut session = sessions
+                .remove(&resolved_id)
+                .ok_or("Session not found during state refresh")?;
+
+            session.session_id = snapshot.session_id.clone();
+            session.session_file = snapshot.session_file.clone();
+            session.model = snapshot.model.clone();
+            session.thinking_level = snapshot.thinking_level.clone();
+
+            if let Some(process) = session.process.as_ref() {
+                *process.session_id_ref.lock().unwrap() =
+                    snapshot.session_id.clone();
+            }
+
+            let info = Self::build_session_info(&session);
+            sessions.insert(snapshot.session_id.clone(), session);
+            info
+        };
+
+        if resolved_id != snapshot.session_id {
+            self.repoint_aliases(&resolved_id, &snapshot.session_id)
+                .await;
+        }
+
+        Ok((session_info, state_data))
     }
 
     async fn stop_session_process(
@@ -932,10 +1080,12 @@ impl AgentManager {
         event_type: &str,
         data: &Value,
     ) {
+        let workspace_id = self.workspace_id_for_session(session_id).await;
         let evt_id = self.event_counter.fetch_add(1, Ordering::SeqCst);
         let stream_event = StreamEvent {
             id: evt_id,
             session_id: session_id.to_string(),
+            workspace_id,
             event_type: event_type.to_string(),
             data: data.clone(),
             timestamp: chrono::Utc::now().timestamp_millis(),
@@ -947,5 +1097,63 @@ impl AgentManager {
         buf.push_back(stream_event.clone());
         drop(buf);
         let _ = self.broadcast_tx.send(stream_event);
+    }
+
+    async fn workspace_id_for_session(&self, session_id: &str) -> String {
+        let resolved_id = self.resolve_session_id(session_id).await;
+        let sessions = self.sessions.read().await;
+        sessions
+            .get(&resolved_id)
+            .map(|session| session.workspace_id.clone())
+            .unwrap_or_default()
+    }
+
+    async fn update_pending_extension_ui_request(
+        sessions: &Arc<RwLock<HashMap<String, AgentSession>>>,
+        session_id: &str,
+        event: &Value,
+    ) {
+        let mut sessions = sessions.write().await;
+        let Some(session) = sessions.get_mut(session_id) else {
+            return;
+        };
+
+        if Self::is_blocking_extension_ui_request(event) {
+            session.pending_extension_ui_request = Some(event.clone());
+            return;
+        }
+
+        if Self::should_clear_pending_extension_ui_request(event) {
+            session.pending_extension_ui_request = None;
+        }
+    }
+
+    fn is_blocking_extension_ui_request(event: &Value) -> bool {
+        if event["type"] != "extension_ui_request" {
+            return false;
+        }
+
+        matches!(
+            event.get("method").and_then(|value| value.as_str()),
+            Some("select" | "confirm" | "input" | "editor")
+        )
+    }
+
+    fn should_clear_pending_extension_ui_request(event: &Value) -> bool {
+        matches!(
+            event.get("type").and_then(|value| value.as_str()),
+            Some(
+                "turn_start"
+                    | "message_start"
+                    | "message_update"
+                    | "message_end"
+                    | "tool_execution_start"
+                    | "tool_execution_update"
+                    | "tool_execution_end"
+                    | "turn_end"
+                    | "agent_end"
+                    | "session_process_exited"
+            )
+        )
     }
 }

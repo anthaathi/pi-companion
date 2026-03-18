@@ -3,14 +3,27 @@ use axum::http::StatusCode;
 use axum::Json;
 
 use crate::app::AppState;
-use crate::models::{ApiResponse, ErrorBody, LoginRequest, LoginResponse, PairRequest, PairResponse};
+use crate::db::AuthSessionRecord;
+use crate::models::{
+    ApiResponse, AuthTokensResponse, ErrorBody, LoginRequest, LogoutRequest, PairRequest,
+    RefreshRequest,
+};
+
+fn auth_tokens_response(session: AuthSessionRecord) -> AuthTokensResponse {
+    AuthTokensResponse {
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        access_expires_at: session.access_expires_at,
+        refresh_expires_at: session.refresh_expires_at,
+    }
+}
 
 #[utoipa::path(
     post,
     path = "/api/auth/login",
     request_body = LoginRequest,
     responses(
-        (status = 200, description = "Login successful", body = LoginResponse),
+        (status = 200, description = "Login successful", body = AuthTokensResponse),
         (status = 401, description = "Invalid credentials", body = ErrorBody),
     ),
     tag = "auth"
@@ -18,7 +31,7 @@ use crate::models::{ApiResponse, ErrorBody, LoginRequest, LoginResponse, PairReq
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
-) -> (StatusCode, Json<ApiResponse<LoginResponse>>) {
+) -> (StatusCode, Json<ApiResponse<AuthTokensResponse>>) {
     if req.username != state.config.auth.username {
         return (
             StatusCode::UNAUTHORIZED,
@@ -34,22 +47,15 @@ pub async fn login(
         );
     }
 
-    match state
-        .db
-        .create_session(&req.username, state.config.auth.session_ttl_hours)
-    {
-        Ok((token, expires_at)) => {
-            let expires = chrono::DateTime::parse_from_rfc3339(&expires_at)
-                .unwrap()
-                .with_timezone(&chrono::Utc);
-            (
-                StatusCode::OK,
-                Json(ApiResponse::ok(LoginResponse {
-                    token,
-                    expires_at: expires,
-                })),
-            )
-        }
+    match state.db.create_auth_session(
+        &req.username,
+        state.config.auth.access_token_ttl_minutes,
+        state.config.auth.refresh_token_ttl_days,
+    ) {
+        Ok(session) => (
+            StatusCode::OK,
+            Json(ApiResponse::ok(auth_tokens_response(session))),
+        ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::err(format!("Session creation failed: {e}"))),
@@ -60,6 +66,7 @@ pub async fn login(
 #[utoipa::path(
     post,
     path = "/api/auth/logout",
+    request_body = Option<LogoutRequest>,
     responses(
         (status = 200, description = "Logged out"),
         (status = 401, description = "Unauthorized", body = ErrorBody),
@@ -70,18 +77,29 @@ pub async fn login(
 pub async fn logout(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
+    body: Option<Json<LogoutRequest>>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
-    let token = match extract_token(&headers) {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(ApiResponse::err("Missing authorization token")),
-            )
-        }
+    let access_token = extract_token(&headers);
+    let refresh_token = body.and_then(|Json(payload)| payload.refresh_token);
+
+    if access_token.is_none() && refresh_token.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse::err(
+                "Missing authorization token or refresh token",
+            )),
+        );
+    }
+
+    let result = if let Some(token) = access_token {
+        state.db.revoke_auth_session_by_access_token(&token)
+    } else if let Some(token) = refresh_token {
+        state.db.revoke_auth_session_by_refresh_token(&token)
+    } else {
+        Ok(())
     };
 
-    match state.db.delete_session(&token) {
+    match result {
         Ok(_) => (StatusCode::OK, Json(ApiResponse::ok("Logged out".to_string()))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -114,7 +132,7 @@ pub async fn check_session(
         }
     };
 
-    match state.db.validate_session(&token) {
+    match state.db.validate_access_token(&token) {
         Ok(Some(username)) => (
             StatusCode::OK,
             Json(ApiResponse::ok(format!("Session valid for user: {username}"))),
@@ -132,10 +150,44 @@ pub async fn check_session(
 
 #[utoipa::path(
     post,
+    path = "/api/auth/refresh",
+    request_body = RefreshRequest,
+    responses(
+        (status = 200, description = "Tokens refreshed", body = AuthTokensResponse),
+        (status = 401, description = "Refresh token invalid or expired", body = ErrorBody),
+    ),
+    tag = "auth"
+)]
+pub async fn refresh(
+    State(state): State<AppState>,
+    Json(req): Json<RefreshRequest>,
+) -> (StatusCode, Json<ApiResponse<AuthTokensResponse>>) {
+    match state.db.rotate_auth_session(
+        &req.refresh_token,
+        state.config.auth.access_token_ttl_minutes,
+        state.config.auth.refresh_token_ttl_days,
+    ) {
+        Ok(Some(session)) => (
+            StatusCode::OK,
+            Json(ApiResponse::ok(auth_tokens_response(session))),
+        ),
+        Ok(None) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse::err("Refresh token invalid or expired")),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::err(format!("Token refresh failed: {e}"))),
+        ),
+    }
+}
+
+#[utoipa::path(
+    post,
     path = "/api/auth/pair",
     request_body = PairRequest,
     responses(
-        (status = 200, description = "Pairing accepted, session token returned", body = PairResponse),
+        (status = 200, description = "Pairing accepted, auth tokens returned", body = AuthTokensResponse),
         (status = 400, description = "Invalid or expired QR ID", body = ErrorBody),
         (status = 408, description = "Pairing rejected by server operator", body = ErrorBody),
         (status = 409, description = "Another pairing request is already pending", body = ErrorBody),
@@ -145,7 +197,7 @@ pub async fn check_session(
 pub async fn pair(
     State(state): State<AppState>,
     Json(req): Json<PairRequest>,
-) -> (StatusCode, Json<ApiResponse<PairResponse>>) {
+) -> (StatusCode, Json<ApiResponse<AuthTokensResponse>>) {
     if !state.pairing.validate_qr_id(&req.qr_id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -168,22 +220,15 @@ pub async fn pair(
         Ok(true) => {
             state.pairing.mark_paired();
             state.pairing.invalidate_qr_id();
-            match state
-                .db
-                .create_session(&state.config.auth.username, state.config.auth.session_ttl_hours)
-            {
-                Ok((token, expires_at)) => {
-                    let expires = chrono::DateTime::parse_from_rfc3339(&expires_at)
-                        .unwrap()
-                        .with_timezone(&chrono::Utc);
-                    (
-                        StatusCode::OK,
-                        Json(ApiResponse::ok(PairResponse {
-                            token,
-                            expires_at: expires,
-                        })),
-                    )
-                }
+            match state.db.create_auth_session(
+                &state.config.auth.username,
+                state.config.auth.access_token_ttl_minutes,
+                state.config.auth.refresh_token_ttl_days,
+            ) {
+                Ok(session) => (
+                    StatusCode::OK,
+                    Json(ApiResponse::ok(auth_tokens_response(session))),
+                ),
                 Err(e) => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ApiResponse::err(format!("Session creation failed: {e}"))),
@@ -218,7 +263,7 @@ pub async fn require_auth(
 
     state
         .db
-        .validate_session(&token)
+        .validate_access_token(&token)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Auth check failed: {e}")))?
         .ok_or((StatusCode::UNAUTHORIZED, "Session invalid or expired".to_string()))
 }

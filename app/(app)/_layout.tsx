@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { Redirect, Slot } from 'expo-router';
+import { Redirect, Slot, usePathname } from 'expo-router';
 
 import { AdaptiveNavigation } from '@/features/navigation/containers/adaptive-navigation';
 import { useAuthStore } from '@/features/auth/store';
@@ -9,6 +9,7 @@ import { useWorkspaceStore } from '@/features/workspace/store';
 import { useAgentStream } from '@/features/agent/hooks/use-agent-stream';
 
 export default function AppLayout() {
+  const pathname = usePathname();
   const serversLoaded = useServersStore((s) => s.loaded);
   const servers = useServersStore((s) => s.servers);
   const authLoaded = useAuthStore((s) => s.loaded);
@@ -18,6 +19,7 @@ export default function AppLayout() {
   const fetchWorkspaces = useWorkspaceStore((s) => s.fetchWorkspaces);
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'no-server'>('loading');
+  const isServerRoute = pathname === '/servers';
 
   useAgentStream();
 
@@ -56,6 +58,9 @@ export default function AppLayout() {
   }
 
   if (status === 'no-server') {
+    if (isServerRoute) {
+      return <Slot />;
+    }
     return <Redirect href="/servers" />;
   }
 

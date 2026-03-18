@@ -9,14 +9,16 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { SquarePen, Minus, RefreshCw } from 'lucide-react-native';
+import { SquarePen, RefreshCw } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useCreateSession } from '@/features/agent/hooks/use-agent-session';
 import { useWorkspaceStore } from '@/features/workspace/store';
 import { useSessions } from '@/features/workspace/hooks/use-sessions';
-import { useCreateSession } from '@/features/agent/hooks/use-agent-session';
+import { requestBrowserNotificationPermission } from '@/features/agent/browser-notifications';
+import { SessionActivityIndicator } from '@/features/workspace/components/session-activity-indicator';
 
 const SHEET_HEIGHT = 420;
 const TIMING_CONFIG = { duration: 280, easing: Easing.out(Easing.cubic) };
@@ -36,6 +38,7 @@ export function MobileSessionsSheet({ visible, onClose }: MobileSessionsSheetPro
   const overlayOpacity = useSharedValue(0);
 
   const router = useRouter();
+  const createSession = useCreateSession();
   const selectedWorkspaceId = useWorkspaceStore((s) => s.selectedWorkspaceId);
   const workspace = useWorkspaceStore((s) =>
     s.workspaces.find((w) => w.id === s.selectedWorkspaceId)
@@ -56,8 +59,6 @@ export function MobileSessionsSheet({ visible, onClose }: MobileSessionsSheetPro
   const textSecondary = isDark ? '#f1ece8' : colors.textSecondary;
   const btnBg = isDark ? '#191919' : '#F0F0F0';
 
-  const createSession = useCreateSession();
-
   useEffect(() => {
     if (visible) {
       translateY.value = withTiming(0, TIMING_CONFIG);
@@ -77,13 +78,12 @@ export function MobileSessionsSheet({ visible, onClose }: MobileSessionsSheetPro
 
   const handleNewSession = useCallback(async () => {
     if (!selectedWorkspaceId || createSession.isPending) return;
+    requestBrowserNotificationPermission();
     try {
       const info = await createSession.mutateAsync({
         workspaceId: selectedWorkspaceId,
       });
-      router.navigate(
-        `/workspace/${selectedWorkspaceId}/s/${info.session_id}`,
-      );
+      router.navigate(`/workspace/${selectedWorkspaceId}/s/${info.session_id}`);
       dismiss();
     } catch {}
   }, [selectedWorkspaceId, createSession, router, dismiss]);
@@ -209,7 +209,10 @@ export function MobileSessionsSheet({ visible, onClose }: MobileSessionsSheetPro
                     pressed && { opacity: 0.7 },
                   ]}
                 >
-                  <Minus size={14} color={textMuted} strokeWidth={2} />
+                  <SessionActivityIndicator
+                    sessionId={session.id}
+                    color={textMuted}
+                  />
                   <Text
                     style={[styles.sessionTitle, { color: textPrimary }]}
                     numberOfLines={1}

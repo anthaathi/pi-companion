@@ -1,7 +1,8 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { sessionsList, sessionsDelete } from '@/features/api/generated/sdk.gen';
 import type { SessionListItem } from '@/features/api/generated/types.gen';
+import { useWorkspaceStore } from '../store';
 
 const PAGE_SIZE = 20;
 
@@ -30,6 +31,9 @@ function extractPaginated(raw: unknown): {
 
 export function useSessions(workspaceId: string | null) {
   const queryClient = useQueryClient();
+  const registerWorkspaceSessions = useWorkspaceStore(
+    (s) => s.registerWorkspaceSessions,
+  );
 
   const query = useInfiniteQuery({
     queryKey: sessionsQueryKey(workspaceId ?? ''),
@@ -53,8 +57,22 @@ export function useSessions(workspaceId: string | null) {
     enabled: !!workspaceId,
   });
 
-  const sessions = query.data?.pages.flatMap((p) => p.items) ?? [];
-  const total = query.data?.pages.at(-1)?.total ?? 0;
+  const sessions = useMemo(
+    () => query.data?.pages.flatMap((p) => p.items) ?? [],
+    [query.data],
+  );
+  const total = useMemo(
+    () => query.data?.pages.at(-1)?.total ?? 0,
+    [query.data],
+  );
+
+  useEffect(() => {
+    if (!workspaceId || sessions.length === 0) return;
+    registerWorkspaceSessions(
+      workspaceId,
+      sessions.map((session) => session.id),
+    );
+  }, [workspaceId, sessions, registerWorkspaceSessions]);
 
   const deleteSession = useCallback(
     async (sessionId: string) => {

@@ -1,4 +1,23 @@
-const CameraView = () => null;
-const useCameraPermissions = () => [{ granted: false }, async () => {}];
+const permission = { granted: false, canAskAgain: true };
 
-export { CameraView, useCameraPermissions };
+const CameraView = () => null;
+const getCameraPermissionsAsync = async () => permission;
+const requestCameraPermissionsAsync = async () => permission;
+const useCameraPermissions = () => [
+  permission,
+  requestCameraPermissionsAsync,
+  getCameraPermissionsAsync,
+];
+
+const Camera = {
+  getCameraPermissionsAsync,
+  requestCameraPermissionsAsync,
+};
+
+export {
+  Camera,
+  CameraView,
+  getCameraPermissionsAsync,
+  requestCameraPermissionsAsync,
+  useCameraPermissions,
+};

@@ -1,10 +1,11 @@
-import { useCallback, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { ChevronDown, ChevronRight } from "lucide-react-native";
+import { ChevronDown, ChevronRight, Columns2, Rows2 } from "lucide-react-native";
 
 import { Colors, Fonts } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useAppSettingsStore, type DiffViewMode } from "@/features/settings/store";
 import type { ToolCallInfo } from "../../types";
 import { ToolCallCard } from "./tool-call-card";
 
@@ -90,7 +91,14 @@ function multiGroupLabel(toolName: string, count: number): string {
 function BashToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
-  const [expanded, setExpanded] = useState(true);
+
+  const isRunning = tc.status === "running" || tc.status === "streaming" || tc.status === "pending";
+  const isComplete = tc.status === "complete" || tc.status === "error";
+  const [expanded, setExpanded] = useState(!isComplete);
+
+  useEffect(() => {
+    if (isRunning) setExpanded(true);
+  }, [isRunning]);
 
   let command = "";
   try {
@@ -99,7 +107,6 @@ function BashToolCall({ tc }: { tc: ToolCallInfo }) {
   } catch {}
 
   const output = tc.result ?? tc.partialResult;
-  const isRunning = tc.status === "running" || tc.status === "streaming";
   const textColor = isDark ? "#CCCCCC" : "#1A1A1A";
   const mutedColor = isDark ? "#888" : "#888";
   const shortCmd = command.length > 60 ? command.slice(0, 60) + "…" : command;
@@ -121,26 +128,30 @@ function BashToolCall({ tc }: { tc: ToolCallInfo }) {
 
       {expanded && (
         <View style={[bashStyles.box, {
-          backgroundColor: isDark ? "#0D0D0D" : "#1A1A1A",
-          borderColor: isDark ? "#2A2A2A" : "#333333",
+          backgroundColor: isDark ? "#0D0D0D" : "#F6F6F6",
+          borderColor: isDark ? "#2A2A2A" : "#E8E8E8",
         }]}>
-          {output ? (
-            <Text
-              style={[bashStyles.output, {
-                color: tc.isError
-                  ? (isDark ? "#F85149" : "#FF6B6B")
-                  : (isDark ? "#8B8B8B" : "#AAAAAA"),
-              }]}
-              selectable
-            >
-              {output.length > 3000
-                ? output.slice(0, 3000) + "\n… truncated"
-                : output}
-            </Text>
-          ) : null}
-          {isRunning && !output && (
-            <Text style={[bashStyles.output, { color: isDark ? "#8B8B8B" : "#AAAAAA" }]}>Running…</Text>
-          )}
+          <ScrollView style={bashStyles.scroll} nestedScrollEnabled>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {output ? (
+                <Text
+                  style={[bashStyles.output, {
+                    color: tc.isError
+                      ? (isDark ? "#F85149" : "#CF222E")
+                      : (isDark ? "#8B8B8B" : "#666666"),
+                  }]}
+                  selectable
+                >
+                  {output.length > 3000
+                    ? output.slice(0, 3000) + "\n… truncated"
+                    : output}
+                </Text>
+              ) : null}
+              {isRunning && !output && (
+                <Text style={[bashStyles.output, { color: isDark ? "#8B8B8B" : "#999999" }]}>Running…</Text>
+              )}
+            </ScrollView>
+          </ScrollView>
         </View>
       )}
     </View>
@@ -155,6 +166,9 @@ const bashStyles = StyleSheet.create({
     paddingVertical: 10,
     marginTop: 8,
     gap: 6,
+  },
+  scroll: {
+    maxHeight: 400,
   },
   commandLine: {
     fontSize: 13,
@@ -176,9 +190,526 @@ const bashStyles = StyleSheet.create({
   },
 });
 
+type DiffOp = { type: "equal" | "insert" | "delete"; lines: string[] };
+
+function lcsLineDiff(oldText: string, newText: string): DiffOp[] {
+  const a = oldText.split("\n");
+  const b = newText.split("\n");
+  const n = a.length;
+  const m = b.length;
+
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      if (a[i] === b[j]) {
+        dp[i][j] = dp[i + 1][j + 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+  }
+
+  const ops: DiffOp[] = [];
+  let i = 0, j = 0;
+
+  const push = (type: DiffOp["type"], line: string) => {
+    const last = ops[ops.length - 1];
+    if (last && last.type === type) {
+      last.lines.push(line);
+    } else {
+      ops.push({ type, lines: [line] });
+    }
+  };
+
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      push("equal", a[i]);
+      i++;
+      j++;
+    } else if ((dp[i + 1]?.[j] ?? 0) >= (dp[i]?.[j + 1] ?? 0)) {
+      push("delete", a[i]);
+      i++;
+    } else {
+      push("insert", b[j]);
+      j++;
+    }
+  }
+  while (i < n) { push("delete", a[i]); i++; }
+  while (j < m) { push("insert", b[j]); j++; }
+
+  return ops;
+}
+
+interface SideBySideRow {
+  leftLineNo: number | null;
+  leftText: string | null;
+  leftType: "removed" | "context" | "empty";
+  rightLineNo: number | null;
+  rightText: string | null;
+  rightType: "added" | "context" | "empty";
+}
+
+function buildSideBySide(ops: DiffOp[]): SideBySideRow[] {
+  const rows: SideBySideRow[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    if (op.type === "equal") {
+      for (const line of op.lines) {
+        rows.push({
+          leftLineNo: oldLine++, leftText: line, leftType: "context",
+          rightLineNo: newLine++, rightText: line, rightType: "context",
+        });
+      }
+    } else if (op.type === "delete") {
+      const next = ops[i + 1];
+      if (next && next.type === "insert") {
+        const maxLen = Math.max(op.lines.length, next.lines.length);
+        for (let k = 0; k < maxLen; k++) {
+          const hasOld = k < op.lines.length;
+          const hasNew = k < next.lines.length;
+          rows.push({
+            leftLineNo: hasOld ? oldLine++ : null,
+            leftText: hasOld ? op.lines[k] : null,
+            leftType: hasOld ? "removed" : "empty",
+            rightLineNo: hasNew ? newLine++ : null,
+            rightText: hasNew ? next.lines[k] : null,
+            rightType: hasNew ? "added" : "empty",
+          });
+        }
+        i++;
+      } else {
+        for (const line of op.lines) {
+          rows.push({
+            leftLineNo: oldLine++, leftText: line, leftType: "removed",
+            rightLineNo: null, rightText: null, rightType: "empty",
+          });
+        }
+      }
+    } else {
+      for (const line of op.lines) {
+        rows.push({
+          leftLineNo: null, leftText: null, leftType: "empty",
+          rightLineNo: newLine++, rightText: line, rightType: "added",
+        });
+      }
+    }
+  }
+  return rows;
+}
+
+interface InlineRow {
+  type: "context" | "added" | "removed";
+  text: string;
+  oldLineNo: number | null;
+  newLineNo: number | null;
+}
+
+function buildInline(ops: DiffOp[]): InlineRow[] {
+  const rows: InlineRow[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+
+  for (const op of ops) {
+    if (op.type === "equal") {
+      for (const line of op.lines) {
+        rows.push({ type: "context", text: line, oldLineNo: oldLine++, newLineNo: newLine++ });
+      }
+    } else if (op.type === "delete") {
+      for (const line of op.lines) {
+        rows.push({ type: "removed", text: line, oldLineNo: oldLine++, newLineNo: null });
+      }
+    } else {
+      for (const line of op.lines) {
+        rows.push({ type: "added", text: line, oldLineNo: null, newLineNo: newLine++ });
+      }
+    }
+  }
+  return rows;
+}
+
+interface Token { text: string; color: string }
+
+const KEYWORDS = new Set([
+  "import", "export", "from", "default", "const", "let", "var", "function",
+  "return", "if", "else", "for", "while", "do", "switch", "case", "break",
+  "continue", "new", "this", "class", "extends", "super", "typeof", "instanceof",
+  "void", "delete", "throw", "try", "catch", "finally", "async", "await",
+  "yield", "in", "of", "true", "false", "null", "undefined", "type",
+  "interface", "enum", "implements", "abstract", "as", "is", "readonly",
+  "static", "private", "protected", "public", "def", "self", "None", "True",
+  "False", "elif", "except", "raise", "with", "lambda", "pass", "and", "or",
+  "not", "struct", "impl", "fn", "pub", "mut", "use", "mod", "crate",
+]);
+
+function tokenizeLine(line: string, isDark: boolean): Token[] {
+  const c = {
+    keyword: isDark ? "#C586C0" : "#AF00DB",
+    string: isDark ? "#CE9178" : "#A31515",
+    number: isDark ? "#B5CEA8" : "#098658",
+    comment: isDark ? "#6A9955" : "#008000",
+    type: isDark ? "#4EC9B0" : "#267F99",
+    func: isDark ? "#DCDCAA" : "#795E26",
+    punct: isDark ? "#808080" : "#999999",
+    plain: isDark ? "#9CDCFE" : "#333333",
+  };
+
+  const tokens: Token[] = [];
+  const re = /\/\/.*|\/\*[\s\S]*?\*\/|#.*|"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+\.?\d*(?:e[+-]?\d+)?\b|\b0x[0-9a-fA-F]+\b|[A-Z][a-zA-Z0-9_]*|[a-zA-Z_]\w*(?=\s*\()|[a-zA-Z_]\w*|[{}()\[\];:,.<>!=+\-*/%&|^~?@]|[ \t]+|\S/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(line)) !== null) {
+    const t = match[0];
+    if (t.startsWith("//") || t.startsWith("#") || t.startsWith("/*")) {
+      tokens.push({ text: t, color: c.comment });
+    } else if (/^["'`]/.test(t) || t.startsWith('"""') || t.startsWith("'''")) {
+      tokens.push({ text: t, color: c.string });
+    } else if (/^\d/.test(t) || /^0x/i.test(t)) {
+      tokens.push({ text: t, color: c.number });
+    } else if (KEYWORDS.has(t)) {
+      tokens.push({ text: t, color: c.keyword });
+    } else if (/^[A-Z][a-zA-Z0-9_]*$/.test(t)) {
+      tokens.push({ text: t, color: c.type });
+    } else if (/^[a-zA-Z_]\w*$/.test(t) && line[match.index + t.length] === "(") {
+      tokens.push({ text: t, color: c.func });
+    } else if (/^[{}()\[\];:,.<>!=+\-*/%&|^~?@]$/.test(t)) {
+      tokens.push({ text: t, color: c.punct });
+    } else {
+      tokens.push({ text: t, color: c.plain });
+    }
+  }
+
+  if (tokens.length === 0) {
+    tokens.push({ text: line, color: c.plain });
+  }
+
+  return tokens;
+}
+
+function TokenizedText({ line, isDark, style }: { line: string; isDark: boolean; style?: any }) {
+  const tokens = useMemo(() => tokenizeLine(line, isDark), [line, isDark]);
+  return (
+    <Text style={style} selectable>
+      {tokens.map((tok, i) => (
+        <Text key={i} style={{ color: tok.color }}>{tok.text}</Text>
+      ))}
+    </Text>
+  );
+}
+
+function SplitDiffView({
+  rows,
+  containerWidth,
+  isDark,
+  removeBg,
+  addBg,
+  emptyBg,
+  lineNoBg,
+  lineNoColor,
+  dividerColor,
+}: {
+  rows: SideBySideRow[];
+  containerWidth: number;
+  isDark: boolean;
+  removeBg: string;
+  addBg: string;
+  emptyBg: string;
+  lineNoBg: string;
+  lineNoColor: string;
+  dividerColor: string;
+}) {
+  const halfW = Math.max(200, Math.floor((containerWidth - 1) / 2));
+  return (
+    <View style={[editStyles.table, { width: halfW * 2 + 1 }]}>
+      {rows.map((row, i) => (
+        <View key={i} style={editStyles.tableRow}>
+          <View style={[
+            editStyles.half,
+            { width: halfW },
+            row.leftType === "removed" ? { backgroundColor: removeBg } :
+            row.leftType === "empty" ? { backgroundColor: emptyBg } : undefined,
+          ]}>
+            <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
+              <Text style={[editStyles.lineNo, { color: lineNoColor }]}>
+                {row.leftLineNo ?? ""}
+              </Text>
+            </View>
+            {row.leftText != null ? (
+              <TokenizedText line={row.leftText} isDark={isDark} style={editStyles.lineText} />
+            ) : (
+              <Text style={editStyles.lineText}>{" "}</Text>
+            )}
+          </View>
+          <View style={[editStyles.divider, { backgroundColor: dividerColor }]} />
+          <View style={[
+            editStyles.half,
+            { width: halfW },
+            row.rightType === "added" ? { backgroundColor: addBg } :
+            row.rightType === "empty" ? { backgroundColor: emptyBg } : undefined,
+          ]}>
+            <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
+              <Text style={[editStyles.lineNo, { color: lineNoColor }]}>
+                {row.rightLineNo ?? ""}
+              </Text>
+            </View>
+            {row.rightText != null ? (
+              <TokenizedText line={row.rightText} isDark={isDark} style={editStyles.lineText} />
+            ) : (
+              <Text style={editStyles.lineText}>{" "}</Text>
+            )}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function EditToolCall({ tc }: { tc: ToolCallInfo }) {
+  const colorScheme = useColorScheme() ?? "light";
+  const isDark = colorScheme === "dark";
+  const [expanded, setExpanded] = useState(false);
+  const diffViewMode = useAppSettingsStore((s) => s.diffViewMode);
+  const updateSettings = useAppSettingsStore((s) => s.update);
+  const viewMode = diffViewMode;
+  const setViewMode = (mode: DiffViewMode) => updateSettings({ diffViewMode: mode });
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  let path = "";
+  let oldText = "";
+  let newText = "";
+  try {
+    const parsed = JSON.parse(tc.arguments);
+    path = parsed.path ?? "";
+    oldText = parsed.oldText ?? "";
+    newText = parsed.newText ?? "";
+  } catch {}
+
+  const fileName = basename(path);
+  const addedCount = countLines(newText);
+  const removedCount = countLines(oldText);
+  const textColor = isDark ? "#CCCCCC" : "#1A1A1A";
+  const mutedColor = isDark ? "#888" : "#888";
+  const addColor = isDark ? "#3FB950" : "#1A7F37";
+  const removeColor = isDark ? "#F85149" : "#CF222E";
+
+  const ops = useMemo(() => {
+    if (!expanded || (!oldText && !newText)) return [];
+    return lcsLineDiff(oldText, newText);
+  }, [expanded, oldText, newText]);
+
+  const sideBySideRows = useMemo(() => {
+    if (!expanded || viewMode !== "split") return [];
+    return buildSideBySide(ops);
+  }, [expanded, viewMode, ops]);
+
+  const inlineRows = useMemo(() => {
+    if (!expanded || viewMode !== "inline") return [];
+    return buildInline(ops);
+  }, [expanded, viewMode, ops]);
+
+  const addBg = isDark ? "rgba(63, 185, 80, 0.10)" : "rgba(26, 127, 55, 0.06)";
+  const removeBg = isDark ? "rgba(248, 81, 73, 0.10)" : "rgba(207, 34, 46, 0.06)";
+  const boxBg = isDark ? "#0D0D0D" : "#FAFAFA";
+  const boxBorder = isDark ? "#2A2A2A" : "#E8E8E8";
+  const lineNoBg = isDark ? "#111111" : "#F3F3F3";
+  const lineNoColor = isDark ? "#444" : "#BBBBBB";
+  const dividerColor = isDark ? "#2A2A2A" : "#E0E0E0";
+  const emptyBg = isDark ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.02)";
+  const toolbarBg = isDark ? "#161616" : "#F3F3F3";
+  const toolbarBorder = isDark ? "#2A2A2A" : "#E0E0E0";
+  const activeBtnBg = isDark ? "#2A2A2A" : "#FFFFFF";
+
+  const hasData = ops.length > 0;
+
+  return (
+    <View>
+      <Pressable style={styles.row} onPress={() => setExpanded((v) => !v)}>
+        <Text style={styles.singleLine} numberOfLines={1}>
+          <Text style={[styles.verb, { color: textColor }]}>Edit</Text>
+          <Text style={[styles.detail, { color: mutedColor }]}> {fileName}</Text>
+          <Text style={[styles.diff, { color: addColor }]}> +{addedCount}</Text>
+          <Text style={[styles.diff, { color: removeColor }]}> -{removedCount}</Text>
+        </Text>
+        {expanded
+          ? <ChevronDown size={13} color={mutedColor} strokeWidth={1.8} />
+          : <ChevronRight size={13} color={mutedColor} strokeWidth={1.8} />
+        }
+      </Pressable>
+
+      {expanded && hasData && (
+        <View
+          style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}
+          onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+        >
+          <View style={[editStyles.toolbar, { backgroundColor: toolbarBg, borderBottomColor: toolbarBorder }]}>
+            <Text style={[editStyles.toolbarPath, { color: mutedColor }]} numberOfLines={1}>{path}</Text>
+            <View style={editStyles.viewToggle}>
+              <Pressable
+                onPress={() => setViewMode("inline")}
+                style={[
+                  editStyles.viewToggleBtn,
+                  viewMode === "inline" && { backgroundColor: activeBtnBg },
+                ]}
+              >
+                <Rows2 size={12} color={viewMode === "inline" ? textColor : mutedColor} strokeWidth={1.8} />
+              </Pressable>
+              <Pressable
+                onPress={() => setViewMode("split")}
+                style={[
+                  editStyles.viewToggleBtn,
+                  viewMode === "split" && { backgroundColor: activeBtnBg },
+                ]}
+              >
+                <Columns2 size={12} color={viewMode === "split" ? textColor : mutedColor} strokeWidth={1.8} />
+              </Pressable>
+            </View>
+          </View>
+
+          <ScrollView style={editStyles.scrollV} nestedScrollEnabled>
+            {viewMode === "split" ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <SplitDiffView
+                  rows={sideBySideRows}
+                  containerWidth={containerWidth}
+                  isDark={isDark}
+                  removeBg={removeBg}
+                  addBg={addBg}
+                  emptyBg={emptyBg}
+                  lineNoBg={lineNoBg}
+                  lineNoColor={lineNoColor}
+                  dividerColor={dividerColor}
+                />
+              </ScrollView>
+            ) : (
+              <View>
+                {inlineRows.map((row, i) => {
+                  const rowBg =
+                    row.type === "added" ? addBg :
+                    row.type === "removed" ? removeBg : undefined;
+                  const prefix =
+                    row.type === "added" ? "+" : row.type === "removed" ? "-" : " ";
+                  const prefixColor =
+                    row.type === "added" ? addColor :
+                    row.type === "removed" ? removeColor : mutedColor;
+
+                  return (
+                    <View key={i} style={[editStyles.inlineRow, rowBg ? { backgroundColor: rowBg } : undefined]}>
+                      <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
+                        <Text style={[editStyles.lineNo, { color: lineNoColor }]}>
+                          {row.oldLineNo ?? ""}
+                        </Text>
+                      </View>
+                      <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
+                        <Text style={[editStyles.lineNo, { color: lineNoColor }]}>
+                          {row.newLineNo ?? ""}
+                        </Text>
+                      </View>
+                      <Text style={[editStyles.prefix, { color: prefixColor }]}>{prefix}</Text>
+                      <TokenizedText line={row.text} isDark={isDark} style={editStyles.lineText} />
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const editStyles = StyleSheet.create({
+  box: {
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 8,
+    overflow: "hidden",
+  },
+  toolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderBottomWidth: 0.633,
+  },
+  toolbarPath: {
+    fontSize: 11,
+    fontFamily: Fonts.mono,
+    flex: 1,
+    marginRight: 8,
+  },
+  viewToggle: {
+    flexDirection: "row",
+    borderRadius: 4,
+    overflow: "hidden",
+    gap: 2,
+  },
+  viewToggleBtn: {
+    width: 24,
+    height: 20,
+    borderRadius: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scrollV: {
+    maxHeight: 400,
+  },
+  table: {
+    minWidth: "100%",
+  },
+  tableRow: {
+    flexDirection: "row",
+    minHeight: 22,
+  },
+  half: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    overflow: "hidden",
+  },
+  divider: {
+    width: 1,
+  },
+  inlineRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    minHeight: 22,
+  },
+  prefix: {
+    width: 16,
+    fontSize: 12,
+    fontFamily: Fonts.mono,
+    lineHeight: 22,
+    textAlign: "center",
+  },
+  lineNoCol: {
+    width: 32,
+    paddingHorizontal: 4,
+    alignItems: "flex-end",
+    justifyContent: "center",
+  },
+  lineNo: {
+    fontSize: 11,
+    fontFamily: Fonts.mono,
+    lineHeight: 22,
+  },
+  lineText: {
+    fontSize: 12,
+    fontFamily: Fonts.mono,
+    lineHeight: 22,
+    paddingHorizontal: 8,
+    flex: 1,
+  },
+});
+
 function SingleToolCall({ tc }: { tc: ToolCallInfo }) {
   if (tc.name === "bash") {
     return <BashToolCall tc={tc} />;
+  }
+  if (tc.name === "edit") {
+    return <EditToolCall tc={tc} />;
   }
 
   const colorScheme = useColorScheme() ?? "light";

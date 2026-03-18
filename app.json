@@ -39,6 +39,12 @@
           }
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Pi to use your camera to scan server QR codes."
+        }
+      ],
       "expo-font",
       "expo-secure-store",
       "expo-audio"

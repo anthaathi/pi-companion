@@ -13,7 +13,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import Animated, {
   Easing,
   runOnJS,
@@ -741,220 +744,259 @@ export default function ServersScreen() {
 
   if (servers.length === 0) {
     return (
-      <View style={[styles.emptyContainer, { backgroundColor: bg }]}>
-        <View style={styles.emptyContent}>
-          <View
-            style={[
-              styles.emptyIconWrap,
-              {
-                backgroundColor: isDark ? "#fefdfd" : "#1a1a1a",
-                borderColor: isDark ? "#fefdfd" : "#1a1a1a",
-              },
-            ]}
-          >
-            <PiLogo size={36} color={isDark ? "#1a1a1a" : "#fff"} />
-          </View>
-          <Text style={[styles.emptyTitle, { color: textPrimary }]}>
-            No servers configured
-          </Text>
-          <Text style={[styles.emptyDesc, { color: textMuted }]}>
-            Add a server to connect and manage your infrastructure.{"\n"}
-            You can configure the address, credentials, and more.
-          </Text>
-          <View style={styles.emptyBtnRow}>
-            <Pressable
-              onPress={() => setQrVisible(true)}
-              style={({ pressed }) => [
-                styles.emptyAddBtn,
-                { backgroundColor: isDark ? "#fefdfd" : "#1a1a1a" },
-                pressed && { opacity: 0.7 },
+      <SafeAreaView
+        style={[styles.safeArea, { backgroundColor: bg }]}
+        edges={["top", "left", "right"]}
+      >
+        <View style={[styles.emptyContainer, { backgroundColor: bg }]}>
+          <View style={styles.emptyContent}>
+            <View
+              style={[
+                styles.emptyIconWrap,
+                {
+                  backgroundColor: isDark ? "#fefdfd" : "#1a1a1a",
+                },
               ]}
             >
-              <QrCode
-                size={18}
-                color={isDark ? "#1a1a1a" : "#fff"}
-                strokeWidth={2}
-              />
-              <Text
-                style={[
-                  styles.emptyAddBtnText,
-                  { color: isDark ? "#1a1a1a" : "#fff" },
+              <PiLogo size={36} color={isDark ? "#1a1a1a" : "#fff"} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: textPrimary }]}>
+              Welcome to Pi
+            </Text>
+            <Text style={[styles.emptyDesc, { color: textMuted }]}>
+              Connect to a server to get started with your{"\n"}
+              workspaces and infrastructure.
+            </Text>
+            <View style={styles.emptyBtnRow}>
+              <Pressable
+                onPress={() => setQrVisible(true)}
+                style={({ pressed }) => [
+                  styles.emptyBtn,
+                  {
+                    borderWidth: 0.633,
+                    borderColor,
+                  },
+                  pressed && { opacity: 0.7 },
                 ]}
               >
-                Scan QR
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={handleAdd}
-              style={({ pressed }) => [
-                styles.emptyAddBtn,
-                { borderWidth: 0.633, borderColor },
-                pressed && { opacity: 0.7 },
-              ]}
-            >
-              <Plus
-                size={18}
-                color={textPrimary}
-                strokeWidth={2}
-              />
-              <Text
-                style={[
-                  styles.emptyAddBtnText,
-                  { color: textPrimary },
+                <QrCode size={16} color={textPrimary} strokeWidth={2} />
+                <Text style={[styles.emptyBtnText, { color: textPrimary }]}>
+                  Scan QR
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleAdd}
+                style={({ pressed }) => [
+                  styles.emptyBtn,
+                  { backgroundColor: isDark ? "#fefdfd" : "#1a1a1a" },
+                  pressed && { opacity: 0.7 },
                 ]}
               >
-                Add Manually
-              </Text>
-            </Pressable>
+                <Plus
+                  size={16}
+                  color={isDark ? "#1a1a1a" : "#fff"}
+                  strokeWidth={2}
+                />
+                <Text
+                  style={[
+                    styles.emptyBtnText,
+                    { color: isDark ? "#1a1a1a" : "#fff" },
+                  ]}
+                >
+                  Add Server
+                </Text>
+              </Pressable>
+            </View>
           </View>
+          {formModal}
         </View>
-        {formModal}
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: bg }]}
-      contentContainerStyle={[
-        styles.content,
-        { paddingBottom: insets.bottom + 24 },
-      ]}
-      showsVerticalScrollIndicator={false}
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: bg }]}
+      edges={["top", "left", "right"]}
     >
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.title, { color: textPrimary }]}>Servers</Text>
-            <Text style={[styles.description, { color: textMuted }]}>
-              Manage your server connections.
-            </Text>
-          </View>
-          <View style={styles.headerBtns}>
-            <Pressable
-              onPress={() => setQrVisible(true)}
-              style={({ pressed }) => [
-                styles.addBtn,
-                { borderWidth: 0.633, borderColor },
-                pressed && { opacity: 0.7 },
-              ]}
-            >
-              <QrCode size={16} color={textPrimary} strokeWidth={2} />
-            </Pressable>
-            <Pressable
-              onPress={handleAdd}
-              style={({ pressed }) => [
-                styles.addBtn,
-                { backgroundColor: isDark ? "#fefdfd" : "#1a1a1a" },
-                pressed && { opacity: 0.7 },
-              ]}
-            >
-              <Plus
-                size={16}
-                color={isDark ? "#1a1a1a" : "#fff"}
-                strokeWidth={2}
-              />
-              <Text
-                style={[
-                  styles.addBtnText,
-                  { color: isDark ? "#1a1a1a" : "#fff" },
-                ]}
-              >
-                Add
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-
-      <View style={[styles.listCard, { backgroundColor: cardBg, borderColor }]}>
-        {servers.map((server, idx) => {
-          const isActive = activeServerId === server.id;
-          const isConnecting = connecting === server.id;
-
-          return (
-            <Pressable
-              key={server.id}
-              onPress={() => handleConnect(server)}
-              style={({ pressed }) => [
-                styles.serverRow,
-                idx < servers.length - 1 && {
-                  borderBottomWidth: 0.633,
-                  borderBottomColor: borderColor,
-                },
-                pressed && { opacity: 0.7 },
-              ]}
-            >
-              <View
-                style={[
-                  styles.serverIcon,
-                  { backgroundColor: isDark ? "#fefdfd" : "#1a1a1a" },
-                ]}
-              >
-                {isConnecting ? (
-                  <ActivityIndicator size="small" color={isDark ? "#1a1a1a" : "#fff"} />
-                ) : (
-                  <PiLogo size={18} color={isDark ? "#1a1a1a" : "#fff"} />
-                )}
-              </View>
-              <View style={styles.serverInfo}>
-                <Text style={[styles.serverName, { color: textPrimary }]}>
-                  {server.name}
-                  {isActive ? " (connected)" : ""}
+      <View style={[styles.outerContainer, { backgroundColor: bg }]}>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: insets.bottom + 24 },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <View style={styles.headerRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.title, { color: textPrimary }]}>
+                  Servers
                 </Text>
-                <Text style={[styles.serverAddress, { color: textMuted }]}>
-                  {server.address}
+                <Text style={[styles.description, { color: textMuted }]}>
+                  Manage your server connections.
                 </Text>
               </View>
-              <View style={styles.serverActions}>
+              <View style={styles.headerBtns}>
                 <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleEdit(server);
-                  }}
+                  onPress={() => setQrVisible(true)}
                   style={({ pressed }) => [
-                    styles.actionBtn,
-                    pressed && { opacity: 0.5 },
+                    styles.addBtn,
+                    { borderWidth: 0.633, borderColor },
+                    pressed && { opacity: 0.7 },
                   ]}
                 >
-                  <Pencil size={15} color={textMuted} strokeWidth={1.8} />
+                  <QrCode size={16} color={textPrimary} strokeWidth={2} />
                 </Pressable>
                 <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleDelete(server);
-                  }}
+                  onPress={handleAdd}
                   style={({ pressed }) => [
-                    styles.actionBtn,
-                    pressed && { opacity: 0.5 },
+                    styles.addBtn,
+                    { backgroundColor: isDark ? "#fefdfd" : "#1a1a1a" },
+                    pressed && { opacity: 0.7 },
                   ]}
                 >
-                  <Trash2
-                    size={15}
-                    color={colors.destructive}
-                    strokeWidth={1.8}
+                  <Plus
+                    size={16}
+                    color={isDark ? "#1a1a1a" : "#fff"}
+                    strokeWidth={2}
                   />
+                  <Text
+                    style={[
+                      styles.addBtnText,
+                      { color: isDark ? "#1a1a1a" : "#fff" },
+                    ]}
+                  >
+                    Add
+                  </Text>
                 </Pressable>
               </View>
-            </Pressable>
-          );
-        })}
-      </View>
+            </View>
+          </View>
+          <View
+            style={[
+              styles.listCard,
+              { backgroundColor: cardBg, borderColor },
+            ]}
+          >
+            {servers.map((server, idx) => {
+              const isActive = activeServerId === server.id;
+              const isConnecting = connecting === server.id;
 
-      {formModal}
-    </ScrollView>
+              return (
+                <Pressable
+                  key={server.id}
+                  onPress={() => handleConnect(server)}
+                  style={({ pressed }) => [
+                    styles.serverRow,
+                    idx < servers.length - 1 && {
+                      borderBottomWidth: 0.633,
+                      borderBottomColor: borderColor,
+                    },
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.serverIcon,
+                      {
+                        backgroundColor: isDark ? "#fefdfd" : "#1a1a1a",
+                      },
+                    ]}
+                  >
+                    {isConnecting ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={isDark ? "#1a1a1a" : "#fff"}
+                      />
+                    ) : (
+                      <PiLogo
+                        size={18}
+                        color={isDark ? "#1a1a1a" : "#fff"}
+                      />
+                    )}
+                  </View>
+                  <View style={styles.serverInfo}>
+                    <View style={styles.serverNameRow}>
+                      <Text
+                        style={[styles.serverName, { color: textPrimary }]}
+                      >
+                        {server.name}
+                      </Text>
+                      {isActive && (
+                        <View style={styles.connectedBadge}>
+                          <View style={styles.connectedDot} />
+                          <Text style={styles.connectedText}>Connected</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text
+                      style={[styles.serverAddress, { color: textMuted }]}
+                      numberOfLines={1}
+                    >
+                      {server.address}
+                    </Text>
+                  </View>
+                  <View style={styles.serverActions}>
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleEdit(server);
+                      }}
+                      style={({ pressed }) => [
+                        styles.actionBtn,
+                        pressed && { opacity: 0.5 },
+                      ]}
+                    >
+                      <Pencil size={15} color={textMuted} strokeWidth={1.8} />
+                    </Pressable>
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleDelete(server);
+                      }}
+                      style={({ pressed }) => [
+                        styles.actionBtn,
+                        pressed && { opacity: 0.5 },
+                      ]}
+                    >
+                      <Trash2
+                        size={15}
+                        color={colors.destructive}
+                        strokeWidth={1.8}
+                      />
+                    </Pressable>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {formModal}
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  outerContainer: {
+    flex: 1,
+    alignItems: "center",
+  },
   container: {
     flex: 1,
+    width: "100%",
+    maxWidth: 600,
   },
   content: {
     paddingHorizontal: 16,
     paddingTop: 16,
     gap: 20,
-    maxWidth: 600,
   },
   header: {
     gap: 4,
@@ -1002,23 +1044,17 @@ const styles = StyleSheet.create({
     maxWidth: 360,
     gap: 12,
   },
-  emptyBtnRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 8,
-  },
   emptyIconWrap: {
     width: 72,
     height: 72,
     borderRadius: 16,
-    borderWidth: 0.633,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
   },
   emptyTitle: {
-    fontSize: 18,
-    fontFamily: Fonts.sansSemiBold,
+    fontSize: 20,
+    fontFamily: Fonts.sansBold,
     textAlign: "center",
   },
   emptyDesc: {
@@ -1027,17 +1063,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
   },
-  emptyAddBtn: {
+  emptyBtnRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+  },
+  emptyBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    gap: 7,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderRadius: 8,
-    marginTop: 8,
   },
-  emptyAddBtnText: {
-    fontSize: 15,
+  emptyBtnText: {
+    fontSize: 14,
     fontFamily: Fonts.sansSemiBold,
   },
   listCard: {
@@ -1058,10 +1098,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(128,128,128,0.08)",
   },
   serverInfo: {
     flex: 1,
+  },
+  serverNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   serverName: {
     fontSize: 14,
@@ -1071,6 +1115,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Fonts.sans,
     marginTop: 2,
+  },
+  connectedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+    backgroundColor: "rgba(52, 199, 89, 0.12)",
+  },
+  connectedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#34C759",
+  },
+  connectedText: {
+    fontSize: 11,
+    fontFamily: Fonts.sansMedium,
+    color: "#34C759",
   },
   serverActions: {
     flexDirection: "row",

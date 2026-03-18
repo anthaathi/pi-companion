@@ -9,14 +9,15 @@ import {
   View,
 } from "react-native";
 import { useRouter, usePathname } from "expo-router";
-import { SquarePen, Minus, RefreshCw } from "lucide-react-native";
+import { SquarePen, RefreshCw } from "lucide-react-native";
 
 import { Colors, Fonts } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useWorkspaceStore } from "@/features/workspace/store";
 import { useSessions } from "@/features/workspace/hooks/use-sessions";
-import { useCreateSession } from "@/features/agent/hooks/use-agent-session";
 import type { SessionListItem } from "@/features/api/generated/types.gen";
+import { requestBrowserNotificationPermission } from "@/features/agent/browser-notifications";
+import { SessionActivityIndicator } from "@/features/workspace/components/session-activity-indicator";
 
 export function SessionSidebar() {
   const colorScheme = useColorScheme() ?? "light";
@@ -41,19 +42,11 @@ export function SessionSidebar() {
     isRefetching,
   } = useSessions(selectedWorkspaceId);
 
-  const createSession = useCreateSession();
-
-  const handleNewSession = useCallback(async () => {
-    if (!selectedWorkspaceId || createSession.isPending) return;
-    try {
-      const info = await createSession.mutateAsync({
-        workspaceId: selectedWorkspaceId,
-      });
-      router.navigate(
-        `/workspace/${selectedWorkspaceId}/s/${info.session_id}`,
-      );
-    } catch {}
-  }, [selectedWorkspaceId, createSession, router]);
+  const handleNewSession = useCallback(() => {
+    if (!selectedWorkspaceId) return;
+    requestBrowserNotificationPermission();
+    router.navigate(`/workspace/${selectedWorkspaceId}`);
+  }, [selectedWorkspaceId, router]);
 
   const isDark = colorScheme === "dark";
   const bg = colors.background;
@@ -113,18 +106,13 @@ export function SessionSidebar() {
       <View style={styles.actions}>
         <Pressable
           onPress={handleNewSession}
-          disabled={createSession.isPending}
           style={({ pressed }) => [
             styles.newSessionButton,
             { backgroundColor: btnBg },
             pressed && { opacity: 0.8 },
           ]}
         >
-          {createSession.isPending ? (
-            <ActivityIndicator size={14} color={textPrimary} />
-          ) : (
-            <SquarePen size={14} color={textPrimary} strokeWidth={1.8} />
-          )}
+          <SquarePen size={14} color={textPrimary} strokeWidth={1.8} />
           <Text style={[styles.newSessionText, { color: textPrimary }]}>
             New session
           </Text>
@@ -199,7 +187,7 @@ function SessionList({
       duration: 200,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [fadeAnim]);
 
   return (
     <Animated.View style={{ opacity: fadeAnim }}>
@@ -248,7 +236,7 @@ function SessionItem({
         pressed && { opacity: 0.7 },
       ]}
     >
-      <Minus size={14} color={textMuted} strokeWidth={2} />
+      <SessionActivityIndicator sessionId={session.id} color={textMuted} />
       <Text
         style={[styles.sessionTitle, { color: textPrimary }]}
         numberOfLines={1}
@@ -304,10 +292,7 @@ const styles = StyleSheet.create({
     gap: 6,
     height: 32,
     borderRadius: 6,
-    shadowColor: "#131010",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
+    boxShadow: "0px 1px 3px rgba(19, 16, 16, 0.08)",
     elevation: 2,
   },
   newSessionText: {

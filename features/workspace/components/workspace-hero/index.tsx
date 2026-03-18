@@ -1,9 +1,9 @@
 import { useRef, useEffect, useMemo } from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
 import { GitBranch } from "lucide-react-native";
-import Svg, { Circle, Path } from "react-native-svg";
 
 import { Colors, Fonts } from "@/constants/theme";
+import { AnthaathiLogo } from "@/components/anthaathi-logo";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useWorkspaceStore } from "@/features/workspace/store";
 import { useGitStatus } from "@/features/workspace/hooks/use-git-status";
@@ -139,32 +139,7 @@ export function WorkspaceHero() {
           },
         ]}
       >
-        {/* Logo */}
-        <Svg width={48} height={48} viewBox="0 0 100 100">
-          <Circle cx="50" cy="50" r="16" fill="#D71921" />
-          <Path
-            d="M 28 28 A 32 32 0 0 1 50 18"
-            fill="none"
-            stroke={isDark ? "#e0e0e0" : "#1A1A1A"}
-            strokeWidth={12}
-            strokeLinecap="round"
-          />
-          <Path
-            d="M 72 28 A 32 32 0 0 1 72 72"
-            fill="none"
-            stroke={isDark ? "#e0e0e0" : "#1A1A1A"}
-            strokeWidth={12}
-            strokeLinecap="round"
-          />
-          <Path
-            d="M 50 82 A 32 32 0 0 1 28 72"
-            fill="none"
-            stroke={isDark ? "#e0e0e0" : "#1A1A1A"}
-            strokeWidth={12}
-            strokeLinecap="round"
-          />
-          <Circle cx="18" cy="50" r="4" fill={isDark ? "#e0e0e0" : "#0F0F0F"} />
-        </Svg>
+        <AnthaathiLogo size={48} isDark={isDark} />
 
         <Text style={[styles.title, { color: textPrimary }]}>{greeting}</Text>
 

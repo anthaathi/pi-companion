@@ -41,9 +41,16 @@ export function NavigationRail() {
   const isSettingsActive = pathname.startsWith("/settings");
   const isProfileActive = pathname.startsWith("/profile");
 
+  const getLastSession = useWorkspaceStore((s) => s.getLastSession);
+
   const handleWorkspacePress = (id: string) => {
     selectWorkspace(id);
-    router.replace(`/workspace/${id}`);
+    const lastSession = getLastSession(id);
+    if (lastSession) {
+      router.replace(`/workspace/${id}/s/${lastSession}`);
+    } else {
+      router.replace(`/workspace/${id}`);
+    }
   };
 
   const handleContextMenu = useCallback(

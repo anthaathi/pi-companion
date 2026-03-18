@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   NativeSyntheticEvent,
   Platform,
@@ -15,22 +16,27 @@ import { ChevronDown, Check } from 'lucide-react-native';
 
 import { Fonts } from '@/constants/theme';
 import { THINKING_LEVELS, FlatModel, ThinkingLevel } from './constants';
+import { matchesModelSearch } from './model-search';
 import { usePromptTheme } from './use-theme-colors';
 import { ProviderIcon } from './provider-icons';
 import {
   useAgentModels,
   useAgentState,
+  useSetAgentMode,
   useSetModel,
   useSetThinkingLevel,
   type ModelInfo,
 } from '@/features/agent/hooks/use-agent-config';
+import type { AgentMode } from '@/features/agent/mode';
 
 interface ToolbarProps {
   sessionId?: string | null;
   isWideScreen: boolean;
   onOpenMobileSheet: (type: 'model' | 'effort') => void;
+  onDropdownOpenChange?: (isOpen: boolean) => void;
   inputRef: React.RefObject<TextInput | null>;
   skeleton?: React.ReactNode;
+  modeLabel?: string | null;
   ready?: boolean;
 }
 
@@ -40,8 +46,10 @@ export function Toolbar({
   sessionId,
   isWideScreen,
   onOpenMobileSheet,
+  onDropdownOpenChange,
   inputRef,
   skeleton = null,
+  modeLabel = null,
   ready = true,
 }: ToolbarProps) {
   const theme = usePromptTheme();
@@ -52,10 +60,15 @@ export function Toolbar({
   const { data: agentState, isLoading: stateLoading } = useAgentState(sessionId);
   const setModelMutation = useSetModel(sessionId);
   const setThinkingMutation = useSetThinkingLevel(sessionId);
+  const setModeMutation = useSetAgentMode(sessionId);
 
   const currentModel = agentState?.model;
   const currentThinking = agentState?.thinkingLevel ?? 'medium';
+  const currentMode: AgentMode =
+    agentState?.mode ?? (modeLabel?.trim().toLowerCase() === 'plan' ? 'plan' : 'chat');
   const thinkingLabel = THINKING_LEVELS.find((t) => t.level === currentThinking)?.label ?? currentThinking;
+  const [pendingMode, setPendingMode] = useState<AgentMode | null>(null);
+  const displayedMode = pendingMode ?? currentMode;
 
   const [activeDropdown, setActiveDropdown] = useState<DropdownType>(null);
   const [popoverIndex, setPopoverIndex] = useState(0);
@@ -69,15 +82,35 @@ export function Toolbar({
       friction: 26,
       useNativeDriver: true,
     }).start();
-  }, [activeDropdown]);
+  }, [activeDropdown, toolbarDropdownAnim]);
+
+  useEffect(() => {
+    onDropdownOpenChange?.(activeDropdown !== null);
+    return () => onDropdownOpenChange?.(false);
+  }, [activeDropdown, onDropdownOpenChange]);
+
+  useEffect(() => {
+    setPendingMode(null);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (pendingMode && currentMode === pendingMode) {
+      setPendingMode(null);
+    }
+  }, [currentMode, pendingMode]);
+
+  useEffect(() => {
+    if (!pendingMode) return;
+    const timeoutId = setTimeout(() => setPendingMode(null), 4000);
+    return () => clearTimeout(timeoutId);
+  }, [pendingMode]);
 
   const providers = useMemo(() => {
     if (!models) return [];
-    const q = modelSearch.toLowerCase();
     const grouped = new Map<string, ModelInfo[]>();
     const order: string[] = [];
     for (const m of models) {
-      if (q && !m.name.toLowerCase().includes(q) && !m.provider.toLowerCase().includes(q)) continue;
+      if (!matchesModelSearch(modelSearch, m)) continue;
       if (!grouped.has(m.provider)) {
         grouped.set(m.provider, []);
         order.push(m.provider);
@@ -117,6 +150,21 @@ export function Toolbar({
     setActiveDropdown(null);
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [setThinkingMutation, inputRef]);
+
+  const handleSelectMode = useCallback((mode: AgentMode) => {
+    if (mode === currentMode) {
+      setTimeout(() => inputRef.current?.focus(), 0);
+      return;
+    }
+    setPendingMode(mode);
+    setModeMutation.mutate({
+      mode,
+      currentMode,
+    }, {
+      onError: () => setPendingMode(null),
+    });
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, [currentMode, inputRef, setModeMutation]);
 
   const toggleDropdown = useCallback(
     (type: DropdownType) => {
@@ -356,6 +404,65 @@ export function Toolbar({
             </Animated.View>
           )}
         </View>
+
+        <View style={styles.spacer} />
+        <View
+          style={[
+            styles.modeToggle,
+            {
+              backgroundColor: theme.isDark ? '#242422' : '#ECEBE7',
+              borderColor: theme.toolbarBorder,
+            },
+          ]}
+        >
+          {(['chat', 'plan'] as AgentMode[]).map((mode) => {
+            const isActive = displayedMode === mode;
+            const isPendingTarget = pendingMode === mode;
+            return (
+              <Pressable
+                key={mode}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isPendingTarget
+                    ? `Switching to ${mode} mode`
+                    : `Switch to ${mode} mode`
+                }
+                accessibilityState={{
+                  selected: isActive,
+                  disabled: setModeMutation.isPending,
+                }}
+                disabled={setModeMutation.isPending}
+                onPress={() => handleSelectMode(mode)}
+                style={({ pressed }) => [
+                  styles.modeButton,
+                  isActive && {
+                    backgroundColor: theme.isDark ? '#343432' : '#FFFFFF',
+                  },
+                  pressed && !isActive && { opacity: 0.72 },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modeButtonText,
+                    {
+                      color: isActive ? theme.textPrimary : theme.textMuted,
+                      opacity: isPendingTarget ? 0 : 1,
+                    },
+                  ]}
+                >
+                  {mode === 'chat' ? 'Chat' : 'Plan'}
+                </Text>
+                {isPendingTarget && (
+                  <ActivityIndicator
+                    size="small"
+                    color={isActive ? theme.textPrimary : theme.textMuted}
+                    style={styles.modePendingIndicator}
+                  />
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
     </View>
   );
@@ -363,8 +470,8 @@ export function Toolbar({
 
 const styles = StyleSheet.create({
   wrap: {
-    marginTop: -14,
-    paddingTop: 14,
+    marginTop: -10,
+    paddingTop: 10,
     marginHorizontal: 6,
     overflow: 'visible',
   },
@@ -372,7 +479,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 4,
-    paddingVertical: 10,
+    paddingVertical: Platform.OS === 'web' ? 7 : 9,
     borderWidth: 0.633,
     borderTopWidth: 0,
     borderBottomLeftRadius: 12,
@@ -381,19 +488,47 @@ const styles = StyleSheet.create({
     marginTop: Platform.OS === 'android' ? -4 : 0,
     zIndex: Platform.OS === 'android' ? 1 : 5,
   },
+  spacer: {
+    flex: 1,
+  },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    height: 28,
+    height: Platform.OS === 'web' ? 26 : 30,
     paddingHorizontal: 8,
     borderRadius: 6,
     maxWidth: 200,
   },
   buttonText: {
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: Fonts.sansMedium,
     flexShrink: 1,
+  },
+  modeToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 0.633,
+    borderRadius: 999,
+    padding: 1,
+    marginRight: 8,
+  },
+  modeButton: {
+    height: Platform.OS === 'web' ? 26 : 30,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  modeButtonText: {
+    fontSize: 10,
+    fontFamily: Fonts.sansMedium,
+    letterSpacing: 0.2,
+  },
+  modePendingIndicator: {
+    position: 'absolute',
+    alignSelf: 'center',
   },
   popoverAnchor: {
     position: 'relative',
@@ -407,10 +542,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 0.633,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
+    boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.15)',
     elevation: 8,
     zIndex: 10,
   },

@@ -4,30 +4,29 @@ import {
   ActivityIndicator,
   Animated,
   Keyboard,
-  PanResponder,
   Platform,
   StyleSheet,
   Text,
-  UIManager,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors, Fonts } from "@/constants/theme";
+import type { AgentSessionInfo } from "@/features/api/generated/types.gen";
 import { useResponsiveLayout } from "@/features/navigation/hooks/use-responsive-layout";
 import { ChangesPanel } from "@/features/workspace/components/changes-panel";
 import { PromptInput } from "@/features/workspace/components/prompt-input";
 import { WorkspaceHero } from "@/features/workspace/components/workspace-hero";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
 import { useWorkspaceStore } from "@/features/workspace/store";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useCreateSession, useSendPrompt } from "@/features/agent/hooks/use-agent-session";
+import { requestBrowserNotificationPermission } from "@/features/agent/browser-notifications";
 
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+type PendingSessionRequest = {
+  workspaceId: string;
+  promise: Promise<AgentSessionInfo>;
+};
 
 export default function WorkspaceScreen() {
   const { workspaceId } = useLocalSearchParams<{ workspaceId: string }>();
@@ -38,23 +37,90 @@ export default function WorkspaceScreen() {
   const insets = useSafeAreaInsets();
 
   const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
+  const clearWorkspaceNotification = useWorkspaceStore(
+    (s) => s.clearWorkspaceNotification,
+  );
   const createSession = useCreateSession();
   const sendPrompt = useSendPrompt();
   const [sending, setSending] = useState(false);
+  const [preSession, setPreSession] = useState<{
+    workspaceId: string;
+    sessionId: string;
+  } | null>(null);
+  const pendingSessionRef = useRef<PendingSessionRequest | null>(null);
+  const currentWorkspaceRef = useRef<string | null>(workspaceId ?? null);
+
+  const preSessionId =
+    preSession?.workspaceId === workspaceId ? preSession.sessionId : null;
 
   useEffect(() => {
     if (workspaceId) {
       selectWorkspace(workspaceId);
+      clearWorkspaceNotification(workspaceId);
     }
-  }, [workspaceId, selectWorkspace]);
+  }, [workspaceId, selectWorkspace, clearWorkspaceNotification]);
+
+  useEffect(() => {
+    currentWorkspaceRef.current = workspaceId ?? null;
+    setPreSession(null);
+    setSending(false);
+  }, [workspaceId]);
+
+  const ensureSession = useCallback(
+    async (targetWorkspaceId: string) => {
+      if (
+        preSession?.workspaceId === targetWorkspaceId &&
+        preSession.sessionId
+      ) {
+        return preSession.sessionId;
+      }
+
+      const existingRequest = pendingSessionRef.current;
+      if (existingRequest?.workspaceId === targetWorkspaceId) {
+        const info = await existingRequest.promise;
+        return info.session_id;
+      }
+
+      // Reuse the same async path for background pre-creation and Enter submits.
+      const request = createSession.mutateAsync({ workspaceId: targetWorkspaceId });
+      pendingSessionRef.current = {
+        workspaceId: targetWorkspaceId,
+        promise: request,
+      };
+
+      try {
+        const info = await request;
+        if (currentWorkspaceRef.current === targetWorkspaceId) {
+          setPreSession({
+            workspaceId: targetWorkspaceId,
+            sessionId: info.session_id,
+          });
+        }
+        return info.session_id;
+      } finally {
+        if (
+          pendingSessionRef.current?.workspaceId === targetWorkspaceId &&
+          pendingSessionRef.current.promise === request
+        ) {
+          pendingSessionRef.current = null;
+        }
+      }
+    },
+    [createSession, preSession],
+  );
+
+  useEffect(() => {
+    if (!workspaceId || preSessionId) return;
+    void ensureSession(workspaceId).catch(() => {});
+  }, [ensureSession, preSessionId, workspaceId]);
 
   const handleSend = useCallback(
     async (text: string) => {
       if (!workspaceId || sending) return;
+      requestBrowserNotificationPermission();
       setSending(true);
       try {
-        const info = await createSession.mutateAsync({ workspaceId });
-        const sessionId = info.session_id;
+        const sessionId = await ensureSession(workspaceId);
         await sendPrompt.mutateAsync({ sessionId, message: text });
         router.replace(`/workspace/${workspaceId}/s/${sessionId}`);
       } catch (e) {
@@ -62,54 +128,11 @@ export default function WorkspaceScreen() {
         setSending(false);
       }
     },
-    [workspaceId, sending, createSession, sendPrompt, router],
+    [workspaceId, sending, ensureSession, sendPrompt, router],
   );
 
   const isDark = colorScheme === "dark";
   const editorBg = isDark ? "#151515" : "#FAFAFA";
-  const sidebarBorder = isDark ? "#323131" : "rgba(0,0,0,0.08)";
-
-  // Resizable changes panel
-  const PANEL_DEFAULT = 280;
-  const PANEL_MIN = 180;
-  const PANEL_MAX = 480;
-  const [panelWidth, setPanelWidth] = useState(PANEL_DEFAULT);
-  const [isPanelResizing, setIsPanelResizing] = useState(false);
-  const panelWidthRef = useRef(PANEL_DEFAULT);
-  const panelStartRef = useRef(PANEL_DEFAULT);
-
-  const panelResizer = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => {
-      panelStartRef.current = panelWidthRef.current;
-      setIsPanelResizing(true);
-      if (Platform.OS === 'web') {
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-      }
-    },
-    onPanResponderMove: (_e, gs) => {
-      // Drag left = increase width (panel is on the right)
-      const newWidth = Math.max(PANEL_MIN, Math.min(PANEL_MAX, panelStartRef.current - gs.dx));
-      panelWidthRef.current = newWidth;
-      setPanelWidth(newWidth);
-    },
-    onPanResponderRelease: () => {
-      setIsPanelResizing(false);
-      if (Platform.OS === 'web') {
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      }
-    },
-    onPanResponderTerminate: () => {
-      setIsPanelResizing(false);
-      if (Platform.OS === 'web') {
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      }
-    },
-  })).current;
 
   const keyboardPadding = useRef(new Animated.Value(0)).current;
 
@@ -143,7 +166,7 @@ export default function WorkspaceScreen() {
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [keyboardPadding]);
 
   return (
     <Animated.View
@@ -170,23 +193,21 @@ export default function WorkspaceScreen() {
           ) : (
             <WorkspaceHero />
           )}
-          <PromptInput onSend={handleSend} disabled={sending} />
+          <PromptInput
+            sessionId={preSessionId}
+            onSend={handleSend}
+            disabled={sending}
+            sessionReady={!!preSessionId}
+          />
         </View>
 
         {/* Right sidebar */}
         {isWideScreen && (
-          <View
-            style={[styles.sidebarDivider, { borderLeftColor: sidebarBorder, width: panelWidth }]}
-          >
-            <View
-              {...panelResizer.panHandlers}
-              hitSlop={{ left: 8, right: 8 }}
-              style={[styles.resizeHandle, { backgroundColor: editorBg }]}
-            />
-            <View style={{ flex: 1 }}>
+          <WorkspaceSidebar>
+            <View style={{ flex: 1, backgroundColor: editorBg }}>
               <ChangesPanel />
             </View>
-          </View>
+          </WorkspaceSidebar>
         )}
       </View>
 
@@ -216,14 +237,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: Fonts.sansMedium,
   },
-  sidebarDivider: {
-    borderLeftWidth: 0.633,
-    flexDirection: 'row',
-    overflow: 'hidden',
-  },
-  resizeHandle: {
-    width: Platform.OS === 'web' ? 6 : 12,
-    cursor: 'col-resize',
-    alignSelf: 'stretch',
-  } as any,
 });

@@ -1,16 +1,23 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   createSession,
   touchSession,
   prompt as apiPrompt,
+  steer as apiSteer,
+  followUp as apiFollowUp,
   abort as apiAbort,
+  extensionUiResponse as apiExtensionUiResponse,
   getState as apiGetState,
   getMessages as apiGetMessages,
 } from "@/features/api/generated/sdk.gen";
 import { unwrapApiData } from "@/features/api/unwrap";
+import { parsePendingExtensionUiRequest } from "../extension-ui";
 import { useAgentStore } from "../store";
 import type { AgentSessionInfo } from "@/features/api/generated/types.gen";
+import { useWorkspaceStore } from "@/features/workspace/store";
+
+export type PromptStreamingBehavior = "steer" | "followUp";
 
 export function useAgentSession(
   sessionId: string | null,
@@ -18,8 +25,19 @@ export function useAgentSession(
   sessionFile?: string | null,
 ) {
   const setHistoryMessages = useAgentStore((s) => s.setHistoryMessages);
+  const setPendingExtensionUiRequest = useAgentStore(
+    (s) => s.setPendingExtensionUiRequest,
+  );
+  const registerSessionWorkspace = useWorkspaceStore(
+    (s) => s.registerSessionWorkspace,
+  );
   const touchedRef = useRef<string | null>(null);
   const [isSessionReady, setIsSessionReady] = useState(false);
+
+  useEffect(() => {
+    if (!sessionId || !workspaceId) return;
+    registerSessionWorkspace(sessionId, workspaceId);
+  }, [sessionId, workspaceId, registerSessionWorkspace]);
 
   useEffect(() => {
     touchedRef.current = null;
@@ -30,6 +48,7 @@ export function useAgentSession(
     if (!sessionId || !workspaceId || !sessionFile) return;
     if (touchedRef.current === sessionId) return;
     touchedRef.current = sessionId;
+    setPendingExtensionUiRequest(sessionId, null);
 
     (async () => {
       const msgs = await apiGetMessages({
@@ -50,16 +69,40 @@ export function useAgentSession(
         },
       });
       if (!result.error) {
+        const stateResult = await apiGetState({
+          body: { session_id: sessionId },
+        });
+        if (!stateResult.error) {
+          const data = unwrapApiData(stateResult.data) as
+            | Record<string, unknown>
+            | undefined;
+          setPendingExtensionUiRequest(
+            sessionId,
+            parsePendingExtensionUiRequest(data?.pendingExtensionUiRequest),
+          );
+        } else {
+          setPendingExtensionUiRequest(sessionId, null);
+        }
         setIsSessionReady(true);
       }
     })();
-  }, [sessionId, workspaceId, sessionFile, setHistoryMessages]);
+  }, [
+    sessionId,
+    workspaceId,
+    sessionFile,
+    registerSessionWorkspace,
+    setHistoryMessages,
+    setPendingExtensionUiRequest,
+  ]);
 
   return { isSessionReady };
 }
 
 export function useCreateSession() {
   const queryClient = useQueryClient();
+  const registerSessionWorkspace = useWorkspaceStore(
+    (s) => s.registerSessionWorkspace,
+  );
 
   return useMutation({
     mutationFn: async (params: {
@@ -75,7 +118,11 @@ export function useCreateSession() {
       if (result.error) throw new Error("Failed to create session");
       return unwrapApiData(result.data) as AgentSessionInfo;
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      registerSessionWorkspace(
+        data.session_id,
+        data.workspace_id ?? variables.workspaceId,
+      );
       queryClient.refetchQueries({
         queryKey: ["sessions", variables.workspaceId],
       });
@@ -88,15 +135,29 @@ export function useSendPrompt() {
     mutationFn: async (params: {
       sessionId: string;
       message: string;
-      streamingBehavior?: string;
+      streamingBehavior?: PromptStreamingBehavior;
     }) => {
-      const result = await apiPrompt({
-        body: {
-          session_id: params.sessionId,
-          message: params.message,
-          streaming_behavior: params.streamingBehavior,
-        },
-      });
+      const result =
+        params.streamingBehavior === "steer"
+          ? await apiSteer({
+              body: {
+                session_id: params.sessionId,
+                message: params.message,
+              },
+            })
+          : params.streamingBehavior === "followUp"
+            ? await apiFollowUp({
+                body: {
+                  session_id: params.sessionId,
+                  message: params.message,
+                },
+              })
+            : await apiPrompt({
+                body: {
+                  session_id: params.sessionId,
+                  message: params.message,
+                },
+              });
       if (result.error) throw new Error("Failed to send prompt");
       return unwrapApiData(result.data);
     },
@@ -111,6 +172,35 @@ export function useAbortAgent() {
       });
       if (result.error) throw new Error("Failed to abort");
       return unwrapApiData(result.data);
+    },
+  });
+}
+
+export function useSendExtensionUiResponse() {
+  return useMutation({
+    mutationFn: async (params: {
+      sessionId: string;
+      id: string;
+      value?: unknown;
+      confirmed?: boolean;
+      cancelled?: boolean;
+    }) => {
+      const result = await apiExtensionUiResponse({
+        body: {
+          session_id: params.sessionId,
+          id: params.id,
+          value: params.value,
+          confirmed: params.confirmed,
+          cancelled: params.cancelled,
+        },
+      });
+      if (result.error) throw new Error("Failed to send extension UI response");
+      return unwrapApiData(result.data);
+    },
+    onSuccess: (_data, variables) => {
+      useAgentStore
+        .getState()
+        .setPendingExtensionUiRequest(variables.sessionId, null);
     },
   });
 }

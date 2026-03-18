@@ -20,6 +20,7 @@ import { MobileChangesSheet } from "../../components/mobile-changes-sheet";
 import { SessionSidebar } from "@/features/workspace/components/session-sidebar";
 import { useAuthStore } from "@/features/auth/store";
 import { useWorkspaceStore } from "@/features/workspace/store";
+import { ConnectionStatusBanner } from "@/features/agent/components/connection-status-banner";
 
 const SIDEBAR_DEFAULT = 280;
 const SIDEBAR_MIN = 200;
@@ -72,7 +73,7 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
         setShowPersistentSidebar(false);
       }
     });
-  }, [isPersistent]);
+  }, [isPersistent, persistentAnim]);
 
   // Animate hover sidebar slide
   useEffect(() => {
@@ -82,7 +83,7 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
       friction: 24,
       useNativeDriver: true,
     }).start();
-  }, [hoverVisible, isPersistent]);
+  }, [hoverAnim, hoverVisible, isPersistent]);
 
   const handleToggleSidebar = useCallback(() => {
     setSidebarMode((prev) => (prev === "persistent" ? "hover" : "persistent"));
@@ -266,6 +267,7 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
             )}
           </Animated.View>
         </View>
+        {hasServer && <ConnectionStatusBanner />}
       </SafeAreaView>
     );
   }
@@ -275,7 +277,7 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
       style={[styles.narrowContainer, { backgroundColor: colors.background }]}
     >
       <SafeAreaView
-        style={[styles.narrowContainer, { backgroundColor: colors.background }]}
+        style={[styles.narrowSafeArea, { backgroundColor: colors.background }]}
         edges={["top"]}
       >
         {hasServer && (
@@ -284,7 +286,10 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
             onGitPress={() => setChangesSheetVisible(true)}
           />
         )}
-        <View style={styles.mobileContent}>{children}</View>
+        <View style={styles.mobileContent}>
+          {children}
+        </View>
+        {hasServer && <ConnectionStatusBanner />}
       </SafeAreaView>
       {hasServer && (
         <>
@@ -313,6 +318,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
   },
   narrowContainer: {
+    flex: 1,
+  },
+  narrowSafeArea: {
     flex: 1,
   },
   content: {

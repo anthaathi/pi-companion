@@ -1,12 +1,13 @@
-import { useCallback } from "react";
 import { useQuery, useSuspenseQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getAvailableModels,
   setModel as apiSetModel,
   setThinkingLevel as apiSetThinkingLevel,
   getState as apiGetState,
+  prompt as apiPrompt,
 } from "@/features/api/generated/sdk.gen";
 import { unwrapApiData } from "@/features/api/unwrap";
+import { extractAgentMode, type AgentMode } from "@/features/agent/mode";
 
 export interface ModelInfo {
   id: string;
@@ -58,6 +59,7 @@ export function useAgentState(sessionId: string | null | undefined) {
       return {
         model: data?.model as ModelInfo | null,
         thinkingLevel: (data?.thinkingLevel ?? "medium") as ThinkingLevel,
+        mode: extractAgentMode(data),
       };
     },
     enabled: !!sessionId,
@@ -98,6 +100,7 @@ export function useAgentStateSuspense(sessionId: string) {
       return {
         model: data?.model as ModelInfo | null,
         thinkingLevel: (data?.thinkingLevel ?? "medium") as ThinkingLevel,
+        mode: extractAgentMode(data),
       };
     },
     staleTime: 30_000,
@@ -136,6 +139,33 @@ export function useSetThinkingLevel(sessionId: string | null | undefined) {
         body: { session_id: sessionId, level },
       });
       if (result.error) throw new Error("Failed to set thinking level");
+      return unwrapApiData(result.data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agent-state", sessionId] });
+    },
+  });
+}
+
+export function useSetAgentMode(sessionId: string | null | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: {
+      mode: AgentMode;
+      currentMode?: AgentMode | null;
+    }) => {
+      if (!sessionId) throw new Error("No session");
+      if (params.currentMode === params.mode) {
+        return null;
+      }
+      const result = await apiPrompt({
+        body: {
+          session_id: sessionId,
+          message: "/plan",
+        },
+      });
+      if (result.error) throw new Error("Failed to set mode");
       return unwrapApiData(result.data);
     },
     onSuccess: () => {

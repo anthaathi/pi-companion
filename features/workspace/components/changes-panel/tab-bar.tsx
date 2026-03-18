@@ -4,20 +4,22 @@ import { Fonts } from "@/constants/theme";
 import type { Tab } from "./constants";
 import { useChangesTheme } from "./use-theme-colors";
 
-const TAB_DEFINITIONS: Array<[Tab, (count: number) => string]> = [
-  ["changes", (n) => `${n} Changes`],
-  ["files", () => "Files"],
-  ["history", () => "Log"],
-];
+const TAB_LABELS: Record<Tab, (count: number) => string> = {
+  changes: (n) => `${n} Changes`,
+  files: () => "Files",
+  history: () => "Log",
+};
 
 export function TabBar({
   activeTab,
   onTabChange,
   totalChanges,
+  tabs,
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
   totalChanges: number;
+  tabs: Tab[];
 }) {
   const {
     colors,
@@ -37,11 +39,11 @@ export function TabBar({
     >
       <View
         style={[
-          styles.tabGroup,
-          { backgroundColor: tabContainerBg, borderColor: tabBorder },
-        ]}
-      >
-        {TAB_DEFINITIONS.map(([key, labelFn]) => (
+        styles.tabGroup,
+        { backgroundColor: tabContainerBg, borderColor: tabBorder },
+      ]}
+    >
+        {tabs.map((key) => (
           <Pressable
             key={key}
             style={[
@@ -59,7 +61,7 @@ export function TabBar({
                 },
               ]}
             >
-              {labelFn(totalChanges)}
+              {TAB_LABELS[key](totalChanges)}
             </Text>
           </Pressable>
         ))}

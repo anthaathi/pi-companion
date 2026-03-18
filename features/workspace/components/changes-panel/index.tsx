@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   ScrollView,
@@ -56,6 +56,7 @@ export function ChangesPanel() {
   const {
     data: gitData,
     isLoading,
+    isGitRepo,
     stage,
     unstage,
     discard,
@@ -65,14 +66,31 @@ export function ChangesPanel() {
   } = useGitStatus(cwd);
 
   const { data: logEntries, isLoading: logLoading } = useGitLog(
-    activeTab === "history" ? cwd : null,
+    isGitRepo && activeTab === "history" ? cwd : null,
   );
 
   const { data: fileDiffData, isLoading: diffLoading } = useFileDiff(
-    cwd,
+    isGitRepo ? cwd : null,
     selectedFile?.path ?? null,
     selectedFile?.staged ?? false,
   );
+
+  useEffect(() => {
+    setActiveTab("changes");
+    setCommitMsg("");
+    setStagedOpen(true);
+    setUnstagedOpen(true);
+    setUntrackedOpen(true);
+    setSelectedFile(null);
+    setViewingFile(null);
+    setExpandedDirs(new Set());
+  }, [cwd]);
+
+  useEffect(() => {
+    if (!isGitRepo) {
+      setSelectedFile(null);
+    }
+  }, [isGitRepo]);
 
   const handleFilePress = useCallback(
     (path: string, staged: boolean) => {
@@ -89,6 +107,10 @@ export function ChangesPanel() {
   const unstaged = gitData?.unstaged ?? [];
   const untracked = gitData?.untracked ?? [];
   const totalChanges = staged.length + unstaged.length + untracked.length;
+  const tabs: Tab[] = isGitRepo
+    ? ["changes", "files", "history"]
+    : ["files"];
+  const currentTab: Tab = isGitRepo ? activeTab : "files";
 
   const handleStageAll = useCallback(() => {
     const paths = [...unstaged.map((f) => f.path), ...untracked];
@@ -104,12 +126,13 @@ export function ChangesPanel() {
   return (
     <View style={[styles.container, { backgroundColor: surfaceBg }]}>
       <TabBar
-        activeTab={activeTab}
+        activeTab={currentTab}
         onTabChange={setActiveTab}
         totalChanges={totalChanges}
+        tabs={tabs}
       />
 
-      {gitData && (
+      {isGitRepo && gitData && (
         <BranchBar
           branch={gitData.branch}
           ahead={gitData.ahead}
@@ -122,9 +145,9 @@ export function ChangesPanel() {
         <View
           style={[
             styles.tabPanel,
-            activeTab !== "files" && styles.tabPanelHidden,
+            currentTab !== "files" && styles.tabPanelHidden,
           ]}
-          pointerEvents={activeTab === "files" ? "auto" : "none"}
+          pointerEvents={currentTab === "files" ? "auto" : "none"}
         >
           {cwd ? (
             <FileTree
@@ -141,49 +164,47 @@ export function ChangesPanel() {
           )}
         </View>
 
-        <ScrollView
-          style={[
-            styles.tabPanel,
-            activeTab === "files" && styles.tabPanelHidden,
-          ]}
-          contentContainerStyle={styles.contentInner}
-          showsVerticalScrollIndicator={false}
-          pointerEvents={activeTab !== "files" ? "auto" : "none"}
-        >
-          {isLoading ? (
-            <ActivityIndicator style={{ marginTop: 32 }} />
-          ) : !gitData ? (
-            <Text style={[styles.emptyText, { color: textMuted }]}>
-              Not a git repository
-            </Text>
-          ) : activeTab === "changes" ? (
-            <ChangesTab
-              staged={staged}
-              unstaged={unstaged}
-              untracked={untracked}
-              stagedOpen={stagedOpen}
-              unstagedOpen={unstagedOpen}
-              untrackedOpen={untrackedOpen}
-              onToggleStaged={() => setStagedOpen((p) => !p)}
-              onToggleUnstaged={() => setUnstagedOpen((p) => !p)}
-              onToggleUntracked={() => setUntrackedOpen((p) => !p)}
-              selectedFile={selectedFile}
-              diffContent={fileDiffData?.diff}
-              diffLoading={diffLoading}
-              onFilePress={handleFilePress}
-              onStage={stage}
-              onUnstage={unstage}
-              onDiscard={discard}
-            />
-          ) : logLoading ? (
-            <ActivityIndicator style={{ marginTop: 32 }} />
-          ) : (
-            <HistoryTab entries={logEntries ?? []} />
-          )}
-        </ScrollView>
+        {isGitRepo && (
+          <ScrollView
+            style={[
+              styles.tabPanel,
+              currentTab === "files" && styles.tabPanelHidden,
+            ]}
+            contentContainerStyle={styles.contentInner}
+            showsVerticalScrollIndicator={false}
+            pointerEvents={currentTab !== "files" ? "auto" : "none"}
+          >
+            {isLoading ? (
+              <ActivityIndicator style={{ marginTop: 32 }} />
+            ) : currentTab === "changes" ? (
+              <ChangesTab
+                staged={staged}
+                unstaged={unstaged}
+                untracked={untracked}
+                stagedOpen={stagedOpen}
+                unstagedOpen={unstagedOpen}
+                untrackedOpen={untrackedOpen}
+                onToggleStaged={() => setStagedOpen((p) => !p)}
+                onToggleUnstaged={() => setUnstagedOpen((p) => !p)}
+                onToggleUntracked={() => setUntrackedOpen((p) => !p)}
+                selectedFile={selectedFile}
+                diffContent={fileDiffData?.diff}
+                diffLoading={diffLoading}
+                onFilePress={handleFilePress}
+                onStage={stage}
+                onUnstage={unstage}
+                onDiscard={discard}
+              />
+            ) : logLoading ? (
+              <ActivityIndicator style={{ marginTop: 32 }} />
+            ) : (
+              <HistoryTab entries={logEntries ?? []} />
+            )}
+          </ScrollView>
+        )}
       </View>
 
-      {activeTab === "changes" && staged.length > 0 && (
+      {currentTab === "changes" && staged.length > 0 && (
         <CommitBar
           stagedCount={staged.length}
           commitMsg={commitMsg}
@@ -193,7 +214,7 @@ export function ChangesPanel() {
         />
       )}
 
-      {activeTab === "changes" &&
+      {currentTab === "changes" &&
         staged.length === 0 &&
         (unstaged.length > 0 || untracked.length > 0) && (
           <StageAllBar onStageAll={handleStageAll} />

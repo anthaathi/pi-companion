@@ -1,12 +1,10 @@
 import { useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   Animated,
   Keyboard,
-  PanResponder,
   Platform,
   StyleSheet,
-  UIManager,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,27 +12,24 @@ import { Colors } from "@/constants/theme";
 import { useResponsiveLayout } from "@/features/navigation/hooks/use-responsive-layout";
 import { ChangesPanel } from "@/features/workspace/components/changes-panel";
 import { PromptInput } from "@/features/workspace/components/prompt-input";
+import { WorkspaceSidebar } from "@/features/workspace/components/workspace-sidebar";
 import { useWorkspaceStore } from "@/features/workspace/store";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { MessageList } from "@/features/agent/components/message-list";
 import { ChatShimmer } from "@/features/agent/components/message-list/chat-shimmer";
+import { ExtensionUiDialog } from "@/features/agent/components/extension-ui-dialog";
 import {
   useAgentSession,
   useSendPrompt,
   useAbortAgent,
+  type PromptStreamingBehavior,
 } from "@/features/agent/hooks/use-agent-session";
 import { useAgentStore } from "@/features/agent/store";
 import { useSessions } from "@/features/workspace/hooks/use-sessions";
 import type { ChatMessage } from "@/features/agent/types";
+import { requestBrowserNotificationPermission } from "@/features/agent/browser-notifications";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
-
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export default function SessionScreen() {
   const { workspaceId, sessionId } = useLocalSearchParams<{
@@ -47,14 +42,19 @@ export default function SessionScreen() {
   const insets = useSafeAreaInsets();
 
   const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
+  const clearWorkspaceNotification = useWorkspaceStore(
+    (s) => s.clearWorkspaceNotification,
+  );
   const setLastSession = useWorkspaceStore((s) => s.setLastSession);
 
   useEffect(() => {
-    if (workspaceId) selectWorkspace(workspaceId);
-  }, [workspaceId, selectWorkspace]);
+    if (!workspaceId) return;
+    selectWorkspace(workspaceId);
+    clearWorkspaceNotification(workspaceId);
+  }, [workspaceId, selectWorkspace, clearWorkspaceNotification]);
 
   useEffect(() => {
-    if (Platform.OS !== 'web' && workspaceId && sessionId) {
+    if (workspaceId && sessionId) {
       setLastSession(workspaceId, sessionId);
     }
   }, [workspaceId, sessionId, setLastSession]);
@@ -77,6 +77,12 @@ export default function SessionScreen() {
   const messages = useAgentStore(
     (s) => s.messages[sessionId ?? ""] ?? EMPTY_MESSAGES,
   );
+  const pendingExtensionUiRequest = useAgentStore(
+    (s) => s.pendingExtensionUiRequests[sessionId ?? ""] ?? null,
+  );
+  const connectionStatus = useAgentStore((s) => s.connection.status);
+  const inputBlockedByConnection =
+    connectionStatus === "reconnecting" || connectionStatus === "disconnected";
 
   const sendPromptMutation = useSendPrompt();
   const abortAgent = useAbortAgent();
@@ -84,15 +90,20 @@ export default function SessionScreen() {
   sendRef.current = sendPromptMutation.mutate;
 
   const handleSend = useCallback(
-    (text: string) => {
-      if (!sessionId) return;
+    (
+      text: string,
+      _attachments: unknown[],
+      options?: { queueBehavior?: PromptStreamingBehavior },
+    ) => {
+      if (!sessionId || inputBlockedByConnection) return;
+      requestBrowserNotificationPermission();
       sendRef.current({
         sessionId,
         message: text,
-        streamingBehavior: isStreaming ? "steer" : undefined,
+        streamingBehavior: options?.queueBehavior ?? (isStreaming ? "steer" : undefined),
       });
     },
-    [sessionId, isStreaming],
+    [inputBlockedByConnection, sessionId, isStreaming],
   );
 
   const handleAbort = useCallback(() => {
@@ -102,48 +113,6 @@ export default function SessionScreen() {
 
   const isDark = colorScheme === "dark";
   const editorBg = isDark ? "#151515" : "#FAFAFA";
-  const sidebarBorder = isDark ? "#323131" : "rgba(0,0,0,0.08)";
-
-  const PANEL_DEFAULT = 280;
-  const PANEL_MIN = 180;
-  const PANEL_MAX = 480;
-  const [panelWidth, setPanelWidth] = useState(PANEL_DEFAULT);
-  const panelWidthRef = useRef(PANEL_DEFAULT);
-  const panelStartRef = useRef(PANEL_DEFAULT);
-
-  const panelResizer = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        panelStartRef.current = panelWidthRef.current;
-        if (Platform.OS === "web") {
-          document.body.style.cursor = "col-resize";
-          document.body.style.userSelect = "none";
-        }
-      },
-      onPanResponderMove: (_e, gs) => {
-        const newWidth = Math.max(
-          PANEL_MIN,
-          Math.min(PANEL_MAX, panelStartRef.current - gs.dx),
-        );
-        panelWidthRef.current = newWidth;
-        setPanelWidth(newWidth);
-      },
-      onPanResponderRelease: () => {
-        if (Platform.OS === "web") {
-          document.body.style.cursor = "";
-          document.body.style.userSelect = "";
-        }
-      },
-      onPanResponderTerminate: () => {
-        if (Platform.OS === "web") {
-          document.body.style.cursor = "";
-          document.body.style.userSelect = "";
-        }
-      },
-    }),
-  ).current;
 
   const keyboardPadding = useRef(new Animated.Value(0)).current;
 
@@ -173,7 +142,7 @@ export default function SessionScreen() {
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [keyboardPadding]);
 
   const hasMessages = messages.length > 0;
   const isLoadingHistory = !!sessionId && !hasMessages;
@@ -199,33 +168,32 @@ export default function SessionScreen() {
           ) : (
             <View style={styles.emptyCenter} />
           )}
+          <ExtensionUiDialog
+            sessionId={sessionId}
+            request={pendingExtensionUiRequest}
+          />
           <PromptInput
             sessionId={sessionId}
             onSend={handleSend}
             isStreaming={isStreaming}
             onAbort={handleAbort}
             sessionReady={isSessionReady}
-            disabled={!isSessionReady}
-            allowTypingWhileDisabled
+            disabled={
+              inputBlockedByConnection ||
+              !isSessionReady ||
+              !!pendingExtensionUiRequest
+            }
+            allowTypingWhileDisabled={!inputBlockedByConnection}
+            stackedAbove={!!pendingExtensionUiRequest}
           />
         </View>
 
         {isWideScreen && (
-          <View
-            style={[
-              styles.sidebarDivider,
-              { borderLeftColor: sidebarBorder, width: panelWidth },
-            ]}
-          >
-            <View
-              {...panelResizer.panHandlers}
-              hitSlop={{ left: 8, right: 8 }}
-              style={[styles.resizeHandle, { backgroundColor: editorBg }]}
-            />
-            <View style={{ flex: 1 }}>
+          <WorkspaceSidebar>
+            <View style={{ flex: 1, backgroundColor: editorBg }}>
               <ChangesPanel />
             </View>
-          </View>
+          </WorkspaceSidebar>
         )}
       </View>
 
@@ -248,14 +216,4 @@ const styles = StyleSheet.create({
   emptyCenter: {
     flex: 1,
   },
-  sidebarDivider: {
-    borderLeftWidth: 0.633,
-    flexDirection: "row",
-    overflow: "hidden",
-  },
-  resizeHandle: {
-    width: Platform.OS === "web" ? 6 : 12,
-    cursor: "col-resize",
-    alignSelf: "stretch",
-  } as any,
 });

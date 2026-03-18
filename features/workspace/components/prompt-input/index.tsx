@@ -10,7 +10,6 @@ import {
   Text,
   TextInput,
   TextInputKeyPressEventData,
-  UIManager,
   View,
 } from "react-native";
 import { Plus, ArrowUp, Mic, Square } from "lucide-react-native";
@@ -18,6 +17,8 @@ import * as DocumentPicker from "expo-document-picker";
 import { useQuery } from "@tanstack/react-query";
 
 import { Fonts } from "@/constants/theme";
+import { formatAgentModeLabel } from "@/features/agent/mode";
+import { useAgentStore } from "@/features/agent/store";
 import { useResponsiveLayout } from "@/features/navigation/hooks/use-responsive-layout";
 import { useSpeechRecognition } from "@/features/speech/hooks/use-speech-recognition";
 import { useSpeechSettingsStore } from "@/features/speech/store";
@@ -38,6 +39,7 @@ import { MobileEffortSheet } from "./mobile-effort-sheet";
 
 const BAR_COUNT = 5;
 const BAR_SCALES = [0.6, 0.85, 1, 0.85, 0.6];
+const EMPTY_SLASH_COMMANDS: SlashCommand[] = [];
 
 function WaveformBars({ audioLevel }: { audioLevel: number }) {
   const anims = useRef(
@@ -54,7 +56,7 @@ function WaveformBars({ audioLevel }: { audioLevel: number }) {
         useNativeDriver: false,
       }).start();
     });
-  }, [audioLevel]);
+  }, [anims, audioLevel]);
 
   return (
     <View style={waveStyles.container}>
@@ -163,21 +165,32 @@ const skeletonStyles = StyleSheet.create({
   },
 });
 
-interface PromptInputProps {
-  sessionId?: string | null;
-  onSend?: (text: string, attachments: Attachment[]) => void;
-  isStreaming?: boolean;
-  onAbort?: () => void;
-  disabled?: boolean;
-  sessionReady?: boolean;
-  allowTypingWhileDisabled?: boolean;
-}
-
 type PromptKeyPressEventData = TextInputKeyPressEventData & {
   shiftKey?: boolean;
   isComposing?: boolean;
   keyCode?: number;
 };
+
+type QueueBehavior = "steer" | "followUp";
+
+function formatQueueBehaviorLabel(behavior: QueueBehavior): string {
+  return behavior === "followUp" ? "Follow up" : "Steer";
+}
+
+interface PromptInputProps {
+  sessionId?: string | null;
+  onSend?: (
+    text: string,
+    attachments: Attachment[],
+    options?: { queueBehavior?: QueueBehavior },
+  ) => void;
+  isStreaming?: boolean;
+  onAbort?: () => void;
+  disabled?: boolean;
+  sessionReady?: boolean;
+  allowTypingWhileDisabled?: boolean;
+  stackedAbove?: boolean;
+}
 
 export function PromptInput({
   sessionId,
@@ -187,6 +200,7 @@ export function PromptInput({
   disabled,
   sessionReady = true,
   allowTypingWhileDisabled = false,
+  stackedAbove = false,
 }: PromptInputProps) {
   const theme = usePromptTheme();
   const { isWideScreen } = useResponsiveLayout();
@@ -197,6 +211,9 @@ export function PromptInput({
     allowTypingWhileDisabled && isStartingSession;
   const inputDisabled = !!disabled && !canComposeWhileDisabled;
   const sendDisabled = !!disabled;
+  const streamedMode = useAgentStore(
+    (s) => (sessionId ? s.modes[sessionId] ?? null : null),
+  );
 
   const { data: backendCommands } = useQuery({
     queryKey: ["slash-commands", sessionId],
@@ -217,7 +234,7 @@ export function PromptInput({
     enabled: !!sessionId && sessionReady,
     staleTime: 60_000,
   });
-  const slashCommands: SlashCommand[] = backendCommands ?? [];
+  const slashCommands = backendCommands ?? EMPTY_SLASH_COMMANDS;
 
   // Keyboard visibility (mobile)
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -225,10 +242,11 @@ export function PromptInput({
   const [mobileSheet, setMobileSheet] = useState<null | "model" | "effort">(
     null,
   );
+  const [toolbarPopoverOpen, setToolbarPopoverOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [entryDone, setEntryDone] = useState(false);
-  const shadowAnim = useRef(new Animated.Value(0)).current;
   const toolbarVisible = isWideScreen || (!hideBottomForKeyboard && !mobileSheet);
+  const toolbarOverlap = Platform.OS === "web" || isWideScreen ? -4 : -1;
 
   const closeMobileSheet = useCallback(() => {
     LayoutAnimation.configureNext(
@@ -239,9 +257,6 @@ export function PromptInput({
 
   useEffect(() => {
     if (Platform.OS === "web") return;
-    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-      UIManager.setLayoutAnimationEnabledExperimental(true);
-    }
     const showEvent =
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent =
@@ -289,6 +304,10 @@ export function PromptInput({
   const [slashIndex, setSlashIndex] = useState(0);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const trimmedText = text.trim();
+  const hasDraft = trimmedText.length > 0 || attachments.length > 0;
+  const showAbortButton = !!isStreaming && !hasDraft;
+  const showQueueActions = !!isStreaming && hasDraft;
 
   // --- Speech ---
   const textBeforeSpeechRef = useRef("");
@@ -380,33 +399,45 @@ export function PromptInput({
       friction: 26,
       useNativeDriver: true,
     }).start();
-  }, [showCommands]);
+  }, [dropdownAnim, showCommands]);
 
   useEffect(() => {
-    Animated.timing(shadowAnim, {
-      toValue: isFocused ? 1 : 0,
-      duration: 200,
-      useNativeDriver: false,
-    }).start();
-  }, [isFocused]);
+    if (Platform.OS !== "web" || inputDisabled) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if ((e.target as HTMLElement)?.isContentEditable) return;
+      if (e.key.length !== 1) return;
+      inputRef.current?.focus();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [inputDisabled]);
 
-  const handleSubmit = useCallback(() => {
-    if (sendDisabled) return;
+  const sendDraft = useCallback((queueBehavior?: QueueBehavior) => {
+    if (!hasDraft) return;
 
-    if (isStreaming) {
-      onAbort?.();
-      return;
-    }
+    const nextText = trimmedText;
+    const nextAttachments = attachments;
 
-    const trimmed = text.trim();
-    if (!trimmed && attachments.length === 0) return;
-
-    onSend?.(trimmed, attachments);
+    onSend?.(nextText, nextAttachments, { queueBehavior });
     setText("");
     setAttachments([]);
     setShowCommands(false);
     textBeforeSpeechRef.current = "";
-  }, [attachments, isStreaming, onAbort, onSend, sendDisabled, text]);
+  }, [attachments, hasDraft, onSend, trimmedText]);
+
+  const handleSubmit = useCallback(() => {
+    if (sendDisabled) return;
+
+    if (showAbortButton) {
+      onAbort?.();
+      return;
+    }
+
+    sendDraft(isStreaming ? "steer" : undefined);
+  }, [isStreaming, onAbort, sendDraft, sendDisabled, showAbortButton]);
 
   // --- Slash commands ---
   const handleTextChange = useCallback(
@@ -663,8 +694,9 @@ export function PromptInput({
           {
             backgroundColor: theme.cardBg,
             borderColor: theme.cardBorder,
-            borderTopLeftRadius: showCommands ? 0 : 12,
-            borderTopRightRadius: showCommands ? 0 : 12,
+            borderTopLeftRadius: showCommands || stackedAbove ? 0 : 12,
+            borderTopRightRadius: showCommands || stackedAbove ? 0 : 12,
+            marginBottom: toolbarOverlap,
             ...(entryDone
               ? Platform.OS === "web"
                 ? {
@@ -676,17 +708,10 @@ export function PromptInput({
                     transitionTimingFunction: "ease",
                   }
                 : {
-                    shadowColor: "#000",
-                    shadowOffset: {
-                      width: 0,
-                      height: Platform.OS === "ios" ? 2 : 3,
-                    },
-                    shadowRadius: Platform.OS === "ios" ? 5 : 8,
+                    boxShadow: isFocused
+                      ? `0px ${Platform.OS === "ios" ? 2 : 3}px ${Platform.OS === "ios" ? 5 : 8}px rgba(0, 0, 0, ${Platform.OS === "ios" ? 0.07 : 0.1})`
+                      : "0px 0px 0px rgba(0, 0, 0, 0)",
                     elevation: isFocused ? 2 : 0,
-                    shadowOpacity: shadowAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, Platform.OS === "ios" ? 0.07 : 0.1],
-                    }),
                   }
               : {}),
           } as any,
@@ -771,49 +796,87 @@ export function PromptInput({
             </Pressable>
           )}
           <View style={{ flex: 1 }} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={isStreaming ? "Stop generation" : "Send message"}
-            onPress={handleSubmit}
-            disabled={sendDisabled}
-            style={({ pressed }) => [
-              styles.sendButton,
-              {
-                backgroundColor: isStreaming
-                  ? "#EF4444"
-                  : theme.isDark
-                    ? "#4d4d4b"
-                    : theme.colors.text,
-                opacity: sendDisabled && !isStreaming ? 0.45 : pressed ? 0.85 : 1,
-              },
-            ]}
-          >
-            {isStreaming ? (
-              <Square
-                size={12}
-                color="#FFFFFF"
-                strokeWidth={2}
-                fill="#FFFFFF"
-              />
-            ) : (
-              <ArrowUp
-                size={16}
-                color={theme.isDark ? "#fefdfd" : theme.colors.background}
-                strokeWidth={2}
-              />
-            )}
-          </Pressable>
+          {showQueueActions ? (
+            <View style={styles.queueActionGroup}>
+              {(["steer", "followUp"] as QueueBehavior[]).map((behavior) => (
+                <Pressable
+                  key={behavior}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Send as ${formatQueueBehaviorLabel(behavior)}`}
+                  onPress={() => sendDraft(behavior)}
+                  disabled={sendDisabled}
+                  style={({ pressed }) => [
+                    styles.queueActionButton,
+                    {
+                      backgroundColor: theme.isDark ? "#242422" : "#EFEDE8",
+                      borderColor: theme.cardBorder,
+                      opacity: sendDisabled ? 0.45 : pressed ? 0.82 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.queueActionText,
+                      { color: theme.textSecondary },
+                    ]}
+                  >
+                    {formatQueueBehaviorLabel(behavior)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={showAbortButton ? "Stop generation" : "Send message"}
+              onPress={handleSubmit}
+              disabled={sendDisabled}
+              style={({ pressed }) => [
+                styles.sendButton,
+                {
+                  backgroundColor: theme.isDark ? "#4d4d4b" : theme.colors.text,
+                  opacity: sendDisabled ? 0.45 : pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              {showAbortButton ? (
+                <Square
+                  size={12}
+                  color="#FFFFFF"
+                  strokeWidth={2}
+                  fill="#FFFFFF"
+                />
+              ) : (
+                <ArrowUp
+                  size={16}
+                  color={theme.isDark ? "#fefdfd" : theme.colors.background}
+                  strokeWidth={2}
+                />
+              )}
+            </Pressable>
+          )}
         </View>
       </Animated.View>
 
       {toolbarVisible && (
-        <View style={styles.bottomControlsWrap}>
+        <View
+          style={[
+            styles.bottomControlsWrap,
+            toolbarPopoverOpen && styles.bottomControlsWrapElevated,
+          ]}
+        >
           <Toolbar
             sessionId={sessionId}
             isWideScreen={isWideScreen}
             onOpenMobileSheet={setMobileSheet}
+            onDropdownOpenChange={setToolbarPopoverOpen}
             inputRef={inputRef}
             skeleton={<ToolbarSkeleton isDark={theme.isDark} />}
+            modeLabel={
+              sessionId && sessionReady && streamedMode
+                ? formatAgentModeLabel(streamedMode)
+                : null
+            }
             ready={!!sessionReady && !!sessionId}
           />
         </View>
@@ -864,7 +927,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 12,
     borderWidth: 0.633,
     position: "relative",
-    zIndex: Platform.OS === "android" ? 2 : 6,
+    zIndex: Platform.OS === "android" ? 5 : 8,
   },
   input: {
     paddingHorizontal: 16,
@@ -872,8 +935,6 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     fontSize: 15,
     fontFamily: Fonts.sans,
-    outlineColor: "transparent",
-    outline: "none",
     outlineStyle: "none" as never,
   },
   actionRow: {
@@ -904,13 +965,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   sendButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 6,
+    width: 36,
+    height: 36,
+    borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
   },
+  queueActionGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  queueActionButton: {
+    height: 36,
+    borderRadius: 999,
+    borderWidth: 0.633,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  queueActionText: {
+    fontSize: 12,
+    fontFamily: Fonts.sansMedium,
+  },
   bottomControlsWrap: {
     overflow: "visible",
+    position: "relative",
+    zIndex: Platform.OS === "android" ? 4 : 7,
+  },
+  bottomControlsWrapElevated: {
+    zIndex: Platform.OS === "android" ? 12 : 12,
   },
 });

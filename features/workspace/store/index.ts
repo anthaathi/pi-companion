@@ -35,7 +35,10 @@ async function writeSelectedId(id: string | null) {
 
 async function readLastSessionMap(): Promise<Record<string, string>> {
   try {
-    if (Platform.OS === 'web') return {};
+    if (Platform.OS === 'web') {
+      const raw = localStorage.getItem(LAST_SESSION_KEY);
+      return raw ? JSON.parse(raw) : {};
+    }
     const raw = await SecureStore.getItemAsync(LAST_SESSION_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch {
@@ -45,7 +48,10 @@ async function readLastSessionMap(): Promise<Record<string, string>> {
 
 async function writeLastSessionMap(map: Record<string, string>) {
   try {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web') {
+      localStorage.setItem(LAST_SESSION_KEY, JSON.stringify(map));
+      return;
+    }
     await SecureStore.setItemAsync(LAST_SESSION_KEY, JSON.stringify(map));
   } catch {}
 }
@@ -64,10 +70,34 @@ function mapApiWorkspace(ws: ApiWorkspace, index: number): Workspace {
   };
 }
 
+function mergeWorkspaceUiState(
+  apiWorkspaces: ApiWorkspace[],
+  currentWorkspaces: Workspace[],
+): Workspace[] {
+  const currentById = new Map(
+    currentWorkspaces.map((workspace) => [workspace.id, workspace]),
+  );
+
+  return apiWorkspaces.map((workspace, index) => {
+    const mapped = mapApiWorkspace(workspace, index);
+    const current = currentById.get(mapped.id);
+    if (!current) {
+      return mapped;
+    }
+
+    return {
+      ...mapped,
+      runningSessions: current.runningSessions,
+      hasNotifications: current.hasNotifications,
+    };
+  });
+}
+
 interface WorkspaceState {
   workspaces: Workspace[];
   selectedWorkspaceId: string | null;
   lastSessionByWorkspace: Record<string, string>;
+  sessionWorkspaceById: Record<string, string>;
   loading: boolean;
   error: string | null;
 
@@ -78,6 +108,14 @@ interface WorkspaceState {
   clearLastSession: (workspaceId: string) => void;
   addWorkspace: (workspace: { title: string; path: string; color?: string; startupScript?: string; worktreeEnabled?: boolean }) => Promise<void>;
   removeWorkspace: (id: string) => Promise<void>;
+  registerSessionWorkspace: (sessionId: string, workspaceId: string) => void;
+  registerWorkspaceSessions: (
+    workspaceId: string,
+    sessionIds: string[],
+  ) => void;
+  getWorkspaceForSession: (sessionId: string) => string | null;
+  markWorkspaceNotification: (workspaceId: string) => void;
+  clearWorkspaceNotification: (workspaceId: string) => void;
 }
 
 let _restoredId: string | null = null;
@@ -91,6 +129,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: [],
   selectedWorkspaceId: null,
   lastSessionByWorkspace: {},
+  sessionWorkspaceById: {},
   loading: false,
   error: null,
 
@@ -103,7 +142,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return;
     }
     const rawWorkspaces = unwrapApiData(result.data) ?? [];
-    const workspaces = rawWorkspaces.map(mapApiWorkspace);
+    const workspaces = mergeWorkspaceUiState(rawWorkspaces, get().workspaces);
     const currentSelected = get().selectedWorkspaceId ?? _restoredId;
     const selectedWorkspaceId =
       workspaces.find((w) => w.id === currentSelected)?.id ?? workspaces[0]?.id ?? null;
@@ -158,13 +197,94 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!result.error) {
       set((state) => {
         const filtered = state.workspaces.filter((w) => w.id !== id);
+        const sessionWorkspaceById = Object.fromEntries(
+          Object.entries(state.sessionWorkspaceById).filter(
+            ([, workspaceId]) => workspaceId !== id,
+          ),
+        );
         const selectedId =
           state.selectedWorkspaceId === id
             ? (filtered[0]?.id ?? null)
             : state.selectedWorkspaceId;
         writeSelectedId(selectedId);
-        return { workspaces: filtered, selectedWorkspaceId: selectedId };
+        return {
+          workspaces: filtered,
+          selectedWorkspaceId: selectedId,
+          sessionWorkspaceById,
+        };
       });
     }
   },
+
+  registerSessionWorkspace: (sessionId, workspaceId) =>
+    set((state) => {
+      if (state.sessionWorkspaceById[sessionId] === workspaceId) {
+        return state;
+      }
+
+      return {
+        sessionWorkspaceById: {
+          ...state.sessionWorkspaceById,
+          [sessionId]: workspaceId,
+        },
+      };
+    }),
+
+  registerWorkspaceSessions: (workspaceId, sessionIds) =>
+    set((state) => {
+      let changed = false;
+      const next = { ...state.sessionWorkspaceById };
+
+      for (const sessionId of sessionIds) {
+        if (next[sessionId] === workspaceId) continue;
+        next[sessionId] = workspaceId;
+        changed = true;
+      }
+
+      if (!changed) {
+        return state;
+      }
+
+      return { sessionWorkspaceById: next };
+    }),
+
+  getWorkspaceForSession: (sessionId) => {
+    return get().sessionWorkspaceById[sessionId] ?? null;
+  },
+
+  markWorkspaceNotification: (workspaceId) =>
+    set((state) => {
+      let changed = false;
+      const workspaces = state.workspaces.map((workspace) => {
+        if (
+          workspace.id !== workspaceId ||
+          workspace.hasNotifications
+        ) {
+          return workspace;
+        }
+
+        changed = true;
+        return { ...workspace, hasNotifications: true };
+      });
+
+      return changed ? { workspaces } : state;
+    }),
+
+  clearWorkspaceNotification: (workspaceId) =>
+    set((state) => {
+      let changed = false;
+      const workspaces = state.workspaces.map((workspace) => {
+        if (
+          workspace.id !== workspaceId ||
+          !workspace.hasNotifications
+        ) {
+          return workspace;
+        }
+
+        changed = true;
+        return { ...workspace, hasNotifications: false };
+      });
+
+      return changed ? { workspaces } : state;
+    }),
 }));

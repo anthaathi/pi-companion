@@ -5,7 +5,6 @@ const config = getDefaultConfig(__dirname);
 
 const WEB_STUBS = {
   'react-native-pager-view': path.resolve(__dirname, 'web-stubs/react-native-pager-view.js'),
-  'expo-camera': path.resolve(__dirname, 'web-stubs/expo-camera.js'),
 };
 
 const defaultResolveRequest = config.resolver.resolveRequest;

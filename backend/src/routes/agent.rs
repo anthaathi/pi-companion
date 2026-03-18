@@ -130,7 +130,16 @@ pub async fn create_session(
         .create_session(req.workspace_id, workspace.path, req.session_path)
         .await
     {
-        Ok(info) => (StatusCode::OK, Json(ApiResponse::ok(info))),
+        Ok(info) => {
+            if let Err(err) = state.agent.emit_agent_state(&info.session_id).await {
+                tracing::warn!(
+                    "Failed to emit initial agent_state for {}: {}",
+                    info.session_id,
+                    err
+                );
+            }
+            (StatusCode::OK, Json(ApiResponse::ok(info)))
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::err(e)),
@@ -181,7 +190,16 @@ pub async fn touch_session(
         .touch_session(&session_id, req.session_file, req.workspace_id, workspace.path)
         .await
     {
-        Ok(info) => (StatusCode::OK, Json(ApiResponse::ok(info))),
+        Ok(info) => {
+            if let Err(err) = state.agent.emit_agent_state(&info.session_id).await {
+                tracing::warn!(
+                    "Failed to emit touched agent_state for {}: {}",
+                    info.session_id,
+                    err
+                );
+            }
+            (StatusCode::OK, Json(ApiResponse::ok(info)))
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::err(e)),
@@ -435,7 +453,42 @@ pub async fn get_state(
     if let Err((code, msg)) = require_auth(&state, &headers).await {
         return auth_err(code, msg);
     }
-    forward_command(&state, &req.session_id, json!({"type": "get_state"})).await
+
+    match state
+        .agent
+        .send_command(&req.session_id, json!({"type": "get_state"}))
+        .await
+    {
+        Ok(response) => {
+            if response["success"].as_bool().unwrap_or(false) {
+                let mut data = response.get("data").cloned().unwrap_or(Value::Null);
+                let pending_request = state
+                    .agent
+                    .get_pending_extension_ui_request(&req.session_id)
+                    .await
+                    .unwrap_or(Value::Null);
+
+                if let Some(obj) = data.as_object_mut() {
+                    obj.insert(
+                        "pendingExtensionUiRequest".to_string(),
+                        pending_request,
+                    );
+                }
+
+                (StatusCode::OK, Json(ApiResponse::ok(data)))
+            } else {
+                let error = response["error"]
+                    .as_str()
+                    .unwrap_or("Unknown error")
+                    .to_string();
+                (StatusCode::BAD_REQUEST, Json(ApiResponse::err(error)))
+            }
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::err(e)),
+        ),
+    }
 }
 
 #[utoipa::path(
@@ -1137,10 +1190,16 @@ pub async fn extension_ui_response(
 
     match state
         .agent
-        .send_command(&req.session_id, cmd)
+        .send_untracked_command(&req.session_id, cmd)
         .await
     {
-        Ok(_) => (StatusCode::OK, Json(ApiResponse::ok(json!({"sent": true})))),
+        Ok(_) => {
+            state
+                .agent
+                .clear_pending_extension_ui_request(&req.session_id)
+                .await;
+            (StatusCode::OK, Json(ApiResponse::ok(json!({"sent": true}))))
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::err(e)),

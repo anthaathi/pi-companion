@@ -19,15 +19,16 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import PagerView from 'react-native-pager-view';
 import { useRouter } from 'expo-router';
-import { SquarePen, Minus, RefreshCw, Plus } from 'lucide-react-native';
+import { SquarePen, RefreshCw, Plus } from 'lucide-react-native';
 
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useWorkspaceStore } from '@/features/workspace/store';
-import type { Workspace } from '@/features/workspace/types';
 import { useSessions } from '@/features/workspace/hooks/use-sessions';
 import { useCreateSession } from '@/features/agent/hooks/use-agent-session';
+import { requestBrowserNotificationPermission } from '@/features/agent/browser-notifications';
 import { NewWorkspaceDialog } from '@/features/workspace/components/new-workspace-dialog';
+import { SessionActivityIndicator } from '@/features/workspace/components/session-activity-indicator';
 
 const SHEET_HEIGHT = 620;
 const TIMING_CONFIG = { duration: 280, easing: Easing.out(Easing.cubic) };
@@ -211,6 +212,14 @@ export function WorkspaceSheet({ visible, onClose }: WorkspaceSheetProps) {
                         {ws.title.charAt(0).toUpperCase()}
                       </Text>
                     </View>
+                    {ws.hasNotifications && (
+                      <View
+                        style={[
+                          styles.workspaceDot,
+                          { backgroundColor: colors.notificationDot },
+                        ]}
+                      />
+                    )}
                   </View>
                   <Text
                     style={[
@@ -338,6 +347,7 @@ function SessionPage({ workspaceId, onSessionPress, onDismiss }: SessionPageProp
 
   const handleNewSession = useCallback(async () => {
     if (createSession.isPending) return;
+    requestBrowserNotificationPermission();
     try {
       const info = await createSession.mutateAsync({ workspaceId });
       router.navigate(`/workspace/${workspaceId}/s/${info.session_id}`);
@@ -410,7 +420,10 @@ function SessionPage({ workspaceId, onSessionPress, onDismiss }: SessionPageProp
                 pressed && { opacity: 0.7 },
               ]}
             >
-              <Minus size={14} color={textMuted} strokeWidth={2} />
+              <SessionActivityIndicator
+                sessionId={session.id}
+                color={textMuted}
+              />
               <Text
                 style={[styles.sessionTitle, { color: textPrimary }]}
                 numberOfLines={1}
@@ -492,6 +505,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderColor: 'transparent',
     borderWidth: 2,
+    position: 'relative',
   },
   avatarInner: {
     width: AVATAR_SIZE - 8,
@@ -504,6 +518,14 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontFamily: Fonts.sansSemiBold,
+  },
+  workspaceDot: {
+    position: 'absolute',
+    top: 1,
+    right: 1,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   workspaceLabel: {
     fontSize: 11,
