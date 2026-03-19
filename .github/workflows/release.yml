@@ -55,14 +55,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Enable Corepack
-        run: corepack enable
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
+
+      - name: Enable Corepack
+        shell: bash
+        run: corepack enable && corepack prepare yarn@4.9.2 --activate
 
       - name: Install dependencies
         run: yarn install --immutable
@@ -111,14 +111,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Enable Corepack
-        run: corepack enable
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
+
+      - name: Enable Corepack
+        run: corepack enable && corepack prepare yarn@4.9.2 --activate
 
       - name: Setup Expo
         uses: expo/expo-github-action@v8
@@ -146,14 +145,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Enable Corepack
-        run: corepack enable
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
+
+      - name: Enable Corepack
+        run: corepack enable && corepack prepare yarn@4.9.2 --activate
 
       - name: Setup Expo
         uses: expo/expo-github-action@v8
