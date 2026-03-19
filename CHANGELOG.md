@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/anthaathi/pi-companion/compare/v1.0.1...v1.0.2) (2026-03-19)
+
+
+### Bug Fixes
+
+* upgrade Node to 22, use npm for eas-cli install, fix Windows build ([ecb295a](https://github.com/anthaathi/pi-companion/commit/ecb295aeec87f9f67920359a151b6e2cb6f1ec2b))
+
 ## [1.0.1](https://github.com/anthaathi/pi-companion/compare/v1.0.0...v1.0.1) (2026-03-19)
 
 
