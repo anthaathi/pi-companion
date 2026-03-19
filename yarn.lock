@@ -8616,13 +8616,12 @@ __metadata:
     react-dom: "npm:19.1.0"
     react-native: "npm:0.81.5"
     react-native-gesture-handler: "npm:~2.28.0"
-    react-native-marked: "link:./packages/react-native-marked"
+    react-native-marked: "npm:8.0.1"
     react-native-pager-view: "npm:6.9.1"
     react-native-reanimated: "npm:~4.1.1"
     react-native-reanimated-table: "npm:0.0.2"
     react-native-safe-area-context: "npm:~5.6.0"
     react-native-screens: "npm:~4.16.0"
-    react-native-sse: "patch:react-native-sse@npm%3A1.2.1#~/.yarn/patches/react-native-sse-npm-1.2.1-750984c79d.patch"
     react-native-svg: "npm:15.12.1"
     react-native-web: "npm:~0.21.0"
     react-native-worklets: "npm:0.5.1"
@@ -8963,11 +8962,24 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-native-marked@link:./packages/react-native-marked::locator=pi-ui%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "react-native-marked@link:./packages/react-native-marked::locator=pi-ui%40workspace%3A."
+"react-native-marked@npm:8.0.1":
+  version: 8.0.1
+  resolution: "react-native-marked@npm:8.0.1"
+  dependencies:
+    "@jsamr/counter-style": "npm:2.0.2"
+    "@jsamr/react-native-li": "npm:2.3.1"
+    github-slugger: "npm:2.0.0"
+    html-entities: "npm:2.6.0"
+    marked: "npm:17.0.4"
+    react-native-reanimated-table: "npm:0.0.2"
+    svg-parser: "npm:2.0.4"
+  peerDependencies:
+    react: ">=16.8.6"
+    react-native: ">=0.76.0"
+    react-native-svg: ">=12.3.0"
+  checksum: 10c0/2a1e1ea2d0c6100e74ff3c81ca567a2b9808b96377ed20e9a7250364487a241afe628ef2c1e50db6fb134c4d603067eb1e7b49363bdcfb7fb2f8a2ace10c1ef6
   languageName: node
-  linkType: soft
+  linkType: hard
 
 "react-native-pager-view@npm:6.9.1":
   version: 6.9.1
@@ -9025,20 +9037,6 @@ __metadata:
     react: "*"
     react-native: "*"
   checksum: 10c0/8ec459ff52cbd317bfca598843a0010b4ca9070d05664f28d792594d8ceabb398b9d68abb578f40295e41f906308efe7ac7359046fba7aaf318a0d9d65446102
-  languageName: node
-  linkType: hard
-
-"react-native-sse@npm:1.2.1":
-  version: 1.2.1
-  resolution: "react-native-sse@npm:1.2.1"
-  checksum: 10c0/68b95601da2a0d37b2cd7ee4af16169a4650ec615b656cb064aba537f3f516b2242b0533c90b63fc0950ef39e25f5a62d8bc53c70ac892c460d24dc3efe3d844
-  languageName: node
-  linkType: hard
-
-"react-native-sse@patch:react-native-sse@npm%3A1.2.1#~/.yarn/patches/react-native-sse-npm-1.2.1-750984c79d.patch":
-  version: 1.2.1
-  resolution: "react-native-sse@patch:react-native-sse@npm%3A1.2.1#~/.yarn/patches/react-native-sse-npm-1.2.1-750984c79d.patch::version=1.2.1&hash=5bed0e"
-  checksum: 10c0/1e2bde9cbca3494786bb1020dcbaecffe6af19bfab66fe4bf2c25da6b7a8d11edee36e3edcffa09a77e208b6b393e5ac8032c4f21fe0c923ac50cd47817c4a00
   languageName: node
   linkType: hard
 
