@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/anthaathi/pi-companion/compare/v1.0.0...v1.0.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* setup Node before Corepack, add corepack prepare for Yarn 4 ([a0977e7](https://github.com/anthaathi/pi-companion/commit/a0977e7e2fcaa4a3125c5145ad75200fe38e31c3))
+
 ## 1.0.0 (2026-03-19)
 
 
