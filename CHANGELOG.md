@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.6](https://github.com/anthaathi/pi-companion/compare/v1.0.5...v1.0.6) (2026-03-20)
+
+
+### Bug Fixes
+
+* rename release artifacts to include platform names ([6eb302c](https://github.com/anthaathi/pi-companion/commit/6eb302c4ce4aff00a4c4bd0b265eeb84edf7e529))
+
 ## [1.0.5](https://github.com/anthaathi/pi-companion/compare/v1.0.4...v1.0.5) (2026-03-19)
 
 
