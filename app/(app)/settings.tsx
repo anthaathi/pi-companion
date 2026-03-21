@@ -23,6 +23,7 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
+  MessageSquare,
 } from 'lucide-react-native';
 
 import { Colors, Fonts } from '@/constants/theme';
@@ -30,6 +31,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAppSettingsStore, ThemeMode } from '@/features/settings/store';
 import { SpeechSettings } from '@/features/speech/components/speech-settings';
 import { CustomModelsSection } from '@/features/settings/components/custom-models-section';
+import { useChatStore } from '@/features/chat/store';
 import {
   status2 as getPackageStatus,
   update as updatePackage,
@@ -309,9 +311,18 @@ export default function SettingsScreen() {
   const { themeMode, pushNotifications, soundEffects, loaded, load, update } =
     useAppSettingsStore();
 
+  const chatNoTools = useChatStore((s) => s.noTools);
+  const setChatNoTools = useChatStore((s) => s.setNoTools);
+  const chatLoaded = useChatStore((s) => s.loaded);
+  const loadChat = useChatStore((s) => s.load);
+
   useEffect(() => {
     if (!loaded) load();
   }, [loaded, load]);
+
+  useEffect(() => {
+    if (!chatLoaded) loadChat();
+  }, [chatLoaded, loadChat]);
 
   const themes: { key: ThemeMode; icon: React.ComponentType<any>; label: string }[] = [
     { key: 'light', icon: Sun, label: 'Light' },
@@ -338,6 +349,23 @@ export default function SettingsScreen() {
 
         {/* Custom Models */}
         <CustomModelsSection isDark={isDark} />
+
+        {/* Chat */}
+        <SettingsSection title="Chat" icon={MessageSquare} isDark={isDark} textPrimary={textPrimary}>
+          <SettingsRow
+            label="Enable Tools"
+            description="Allow the model to use tools (read, write, bash, etc.) in chat sessions"
+            isDark={isDark}
+            right={
+              <Switch
+                value={!chatNoTools}
+                onValueChange={(v) => setChatNoTools(!v)}
+                trackColor={{ false: isDark ? '#3b3a39' : '#E0E0E0', true: '#D71921' }}
+              />
+            }
+            isLast
+          />
+        </SettingsSection>
 
         {/* Appearance */}
         <SettingsSection title="Appearance" icon={Palette} isDark={isDark} textPrimary={textPrimary}>

@@ -22,7 +22,6 @@ import { ProviderIcon } from './provider-icons';
 import { useAgentConfig } from '@pi-ui/client';
 import type { AgentMode } from '@/features/agent/mode';
 import { useAppMode } from '@/hooks/use-app-mode';
-import { useChatStore } from '@/features/chat/store';
 
 interface ToolbarProps {
   sessionId?: string | null;
@@ -57,8 +56,6 @@ function ToolbarComponent({
 }: ToolbarProps) {
   const theme = usePromptTheme();
   const appMode = useAppMode();
-  const noTools = useChatStore((s) => s.noTools);
-  const setNoTools = useChatStore((s) => s.setNoTools);
   const modelScrollRef = useRef<ScrollView>(null);
   const modelSearchRef = useRef<TextInput>(null);
 
@@ -447,60 +444,6 @@ function ToolbarComponent({
         </View>
 
         <View style={styles.spacer} />
-        {appMode === 'chat' && (
-          <View
-            style={[
-              styles.modeToggle,
-              {
-                backgroundColor: theme.isDark ? '#242422' : '#ECEBE7',
-                borderColor: theme.toolbarBorder,
-              },
-            ]}
-          >
-            {([true, false] as const).map((toolsOff) => {
-              const isActive = noTools === toolsOff;
-              const label = toolsOff ? 'Chat' : 'Tools';
-              return (
-                <Pressable
-                  key={label}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    toolsOff
-                      ? 'Chat only mode — tools disabled'
-                      : 'Tools mode — tools enabled'
-                  }
-                  accessibilityState={{
-                    selected: isActive,
-                    disabled: toolbarDisabled,
-                  }}
-                  disabled={toolbarDisabled}
-                  onPress={() => {
-                    setNoTools(toolsOff);
-                    setTimeout(() => inputRef.current?.focus(), 0);
-                  }}
-                  style={({ pressed }) => [
-                    styles.modeButton,
-                    isActive && {
-                      backgroundColor: theme.isDark ? '#343432' : '#FFFFFF',
-                    },
-                    pressed && !isActive && { opacity: 0.72 },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.modeButtonText,
-                      {
-                        color: isActive ? theme.textPrimary : theme.textMuted,
-                      },
-                    ]}
-                  >
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
         {appMode === 'code' && <View
           style={[
             styles.modeToggle,
