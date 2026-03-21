@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/anthaathi/pi-companion/compare/v1.0.6...v1.1.0) (2026-03-20)
+
+
+### Features
+
+* optimize stream events, add server restart handling, improve UX ([f5140b0](https://github.com/anthaathi/pi-companion/commit/f5140b0988b14e5f4ec53c41ebe0cf54bfd52ccb))
+* organize the server ([abea01c](https://github.com/anthaathi/pi-companion/commit/abea01c9795369809df767aa94875b0c1345757f))
+
+
+### Bug Fixes
+
+* session loading, shimmer, chat sheet, and shared components ([29e9def](https://github.com/anthaathi/pi-companion/commit/29e9def060fd090d278caf3035fd09b657f7f3e4))
+
 ## [1.0.6](https://github.com/anthaathi/pi-companion/compare/v1.0.5...v1.0.6) (2026-03-20)
 
 
