@@ -19,12 +19,11 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Fonts } from "@/constants/theme";
 import { formatAgentModeLabel } from "@/features/agent/mode";
-import { useAgentSession, useAgentConfig } from "@pi-ui/client";
+import { useAgentSession, useAgentConfig, usePiClient } from "@pi-ui/client";
 import { useResponsiveLayout } from "@/features/navigation/hooks/use-responsive-layout";
 import { useSpeechRecognition } from "@/features/speech/hooks/use-speech-recognition";
 import { useSpeechSettingsStore } from "@/features/speech/store";
-import { getCommands } from "@/features/api/generated/sdk.gen";
-import { unwrapApiData } from "@/features/api/unwrap";
+
 
 import {
   SlashCommand,
@@ -306,21 +305,22 @@ export function PromptInput({
     return null;
   }, [agentSession.messages, agentConfig.state?.model?.contextWindow]);
 
+  const piClient = usePiClient();
   const { data: backendCommands } = useQuery({
     queryKey: ["slash-commands", sessionId],
     queryFn: async () => {
       if (!sessionId) return [];
-      const result = await getCommands({ body: { session_id: sessionId } });
-      if (result.error) return [];
-      const data = unwrapApiData(result.data) as
-        | { commands?: { name: string; description?: string }[] }
-        | undefined;
-      return (
-        data?.commands?.map((c) => ({
-          name: c.name,
-          description: c.description ?? "",
-        })) ?? []
-      );
+      try {
+        const result = await piClient.api.getCommands(sessionId);
+        return (
+          result.commands?.map((c) => ({
+            name: c.name,
+            description: c.description ?? "",
+          })) ?? []
+        );
+      } catch {
+        return [];
+      }
     },
     enabled: !!sessionId && sessionReady,
     staleTime: 60_000,
