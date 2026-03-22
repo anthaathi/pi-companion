@@ -234,85 +234,12 @@ export function DiffBottomSheet({
           ) : null}
 
           {/* Scrollable diff content */}
-          <ScrollView
-            style={s.scrollArea}
-            contentContainerStyle={s.scrollContent}
-            nestedScrollEnabled
-          >
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.hScrollContent}
-            >
-              <View style={s.codeBlock}>
-                {showInline &&
-                  inlineRows.map((row, i) => {
-                    const rowBg =
-                      row.type === "added"
-                        ? diffAddBg
-                        : row.type === "removed"
-                          ? diffRemoveBg
-                          : undefined;
-                    const prefix =
-                      row.type === "added"
-                        ? "+"
-                        : row.type === "removed"
-                          ? "-"
-                          : " ";
-                    const prefixColor =
-                      row.type === "added"
-                        ? addColor
-                        : row.type === "removed"
-                          ? removeColor
-                          : mutedColor;
-                    return (
-                      <View
-                        key={i}
-                        style={[
-                          s.row,
-                          rowBg ? { backgroundColor: rowBg } : undefined,
-                        ]}
-                      >
-                        <View
-                          style={[
-                            s.lineNoCol,
-                            { backgroundColor: lineNoBg },
-                          ]}
-                        >
-                          <Text
-                            style={[s.lineNo, { color: lineNoColor }]}
-                          >
-                            {row.oldLineNo ?? ""}
-                          </Text>
-                        </View>
-                        <View
-                          style={[
-                            s.lineNoCol,
-                            { backgroundColor: lineNoBg },
-                          ]}
-                        >
-                          <Text
-                            style={[s.lineNo, { color: lineNoColor }]}
-                          >
-                            {row.newLineNo ?? ""}
-                          </Text>
-                        </View>
-                        <Text
-                          style={[s.prefix, { color: prefixColor }]}
-                        >
-                          {prefix}
-                        </Text>
-                        <TokenizedText
-                          line={row.text}
-                          isDark={isDark}
-                          style={s.lineText}
-                        />
-                      </View>
-                    );
-                  })}
-
-                {showSplit &&
-                  sideBySideRows.map((row, i) => (
+          {showSplit ? (
+            /* Split view needs horizontal scroll */
+            <ScrollView style={s.scrollArea} nestedScrollEnabled>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={s.codeBlock}>
+                  {sideBySideRows.map((row, i) => (
                     <View key={i} style={s.splitRow}>
                       <View
                         style={[
@@ -324,34 +251,18 @@ export function DiffBottomSheet({
                               : undefined,
                         ]}
                       >
-                        <View
-                          style={[
-                            s.lineNoCol,
-                            { backgroundColor: lineNoBg },
-                          ]}
-                        >
-                          <Text
-                            style={[s.lineNo, { color: lineNoColor }]}
-                          >
+                        <View style={[s.lineNoCol, { backgroundColor: lineNoBg }]}>
+                          <Text style={[s.lineNo, { color: lineNoColor }]}>
                             {row.leftLineNo ?? ""}
                           </Text>
                         </View>
                         {row.leftText != null ? (
-                          <TokenizedText
-                            line={row.leftText}
-                            isDark={isDark}
-                            style={s.lineText}
-                          />
+                          <TokenizedText line={row.leftText} isDark={isDark} style={s.splitLineText} />
                         ) : (
-                          <Text style={s.lineText}>{" "}</Text>
+                          <Text style={s.splitLineText}>{" "}</Text>
                         )}
                       </View>
-                      <View
-                        style={[
-                          s.splitDivider,
-                          { backgroundColor: dividerColor },
-                        ]}
-                      />
+                      <View style={[s.splitDivider, { backgroundColor: dividerColor }]} />
                       <View
                         style={[
                           s.splitHalf,
@@ -362,70 +273,81 @@ export function DiffBottomSheet({
                               : undefined,
                         ]}
                       >
-                        <View
-                          style={[
-                            s.lineNoCol,
-                            { backgroundColor: lineNoBg },
-                          ]}
-                        >
-                          <Text
-                            style={[s.lineNo, { color: lineNoColor }]}
-                          >
+                        <View style={[s.lineNoCol, { backgroundColor: lineNoBg }]}>
+                          <Text style={[s.lineNo, { color: lineNoColor }]}>
                             {row.rightLineNo ?? ""}
                           </Text>
                         </View>
                         {row.rightText != null ? (
-                          <TokenizedText
-                            line={row.rightText}
-                            isDark={isDark}
-                            style={s.lineText}
-                          />
+                          <TokenizedText line={row.rightText} isDark={isDark} style={s.splitLineText} />
                         ) : (
-                          <Text style={s.lineText}>{" "}</Text>
+                          <Text style={s.splitLineText}>{" "}</Text>
                         )}
                       </View>
                     </View>
                   ))}
-
-                {showPreview &&
-                  previewRows!.map((row) => (
+                </View>
+              </ScrollView>
+            </ScrollView>
+          ) : (
+            /* Inline / preview / empty — vertical scroll only, text wraps */
+            <ScrollView style={s.scrollArea} nestedScrollEnabled>
+              {showInline &&
+                inlineRows.map((row, i) => {
+                  const rowBg =
+                    row.type === "added"
+                      ? diffAddBg
+                      : row.type === "removed"
+                        ? diffRemoveBg
+                        : undefined;
+                  const prefix =
+                    row.type === "added" ? "+" : row.type === "removed" ? "-" : " ";
+                  const prefixColor =
+                    row.type === "added"
+                      ? addColor
+                      : row.type === "removed"
+                        ? removeColor
+                        : mutedColor;
+                  return (
                     <View
-                      key={row.lineNo}
-                      style={[
-                        s.row,
-                        { backgroundColor: diffAddBg },
-                      ]}
+                      key={i}
+                      style={[s.row, rowBg ? { backgroundColor: rowBg } : undefined]}
                     >
-                      <View
-                        style={[
-                          s.lineNoCol,
-                          { backgroundColor: lineNoBg },
-                        ]}
-                      >
-                        <Text
-                          style={[s.lineNo, { color: lineNoColor }]}
-                        >
-                          {row.lineNo}
+                      <View style={[s.lineNoCol, { backgroundColor: lineNoBg }]}>
+                        <Text style={[s.lineNo, { color: lineNoColor }]}>
+                          {row.oldLineNo ?? ""}
                         </Text>
                       </View>
-                      <TokenizedText
-                        line={row.text}
-                        isDark={isDark}
-                        style={s.lineText}
-                      />
+                      <View style={[s.lineNoCol, { backgroundColor: lineNoBg }]}>
+                        <Text style={[s.lineNo, { color: lineNoColor }]}>
+                          {row.newLineNo ?? ""}
+                        </Text>
+                      </View>
+                      <Text style={[s.prefix, { color: prefixColor }]}>{prefix}</Text>
+                      <TokenizedText line={row.text} isDark={isDark} style={s.lineText} />
                     </View>
-                  ))}
+                  );
+                })}
 
-                {showEmpty && (
-                  <View style={s.emptyState}>
-                    <Text style={[s.emptyText, { color: mutedColor }]}>
-                      No preview available
-                    </Text>
+              {showPreview &&
+                previewRows!.map((row) => (
+                  <View key={row.lineNo} style={[s.row, { backgroundColor: diffAddBg }]}>
+                    <View style={[s.lineNoCol, { backgroundColor: lineNoBg }]}>
+                      <Text style={[s.lineNo, { color: lineNoColor }]}>{row.lineNo}</Text>
+                    </View>
+                    <TokenizedText line={row.text} isDark={isDark} style={s.lineText} />
                   </View>
-                )}
-              </View>
+                ))}
+
+              {showEmpty && (
+                <View style={s.emptyState}>
+                  <Text style={[s.emptyText, { color: mutedColor }]}>
+                    No preview available
+                  </Text>
+                </View>
+              )}
             </ScrollView>
-          </ScrollView>
+          )}
         </Animated.View>
       </View>
     </Modal>
@@ -504,12 +426,6 @@ const s = StyleSheet.create({
   scrollArea: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  hScrollContent: {
-    flexGrow: 1,
-  },
   codeBlock: {
     minWidth: "100%",
   },
@@ -550,6 +466,14 @@ const s = StyleSheet.create({
     textAlign: "center",
   },
   lineText: {
+    fontSize: 12,
+    fontFamily: Fonts.mono,
+    lineHeight: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    flex: 1,
+  },
+  splitLineText: {
     fontSize: 12,
     fontFamily: Fonts.mono,
     lineHeight: 24,
