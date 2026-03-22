@@ -347,20 +347,19 @@ export function PromptInput({
   const agentConfig = useAgentConfig(sessionReady ? (sessionId ?? null) : null);
 
   // Context usage: find last assistant message with usage info
-  // Context usage: input tokens sent to the model = input + cacheRead + cacheWrite
-  // Output tokens are the model's response and don't count against the context window.
+  // Context usage: input + output + cacheRead + cacheWrite all count toward the window
   const contextUsage = useMemo(() => {
     const contextWindow = agentConfig.state?.model?.contextWindow;
     if (!contextWindow) return null;
     const msgs = agentSession.messages as {
       role: string;
-      usage?: { input?: number; cacheRead?: number; cacheWrite?: number };
+      usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     }[];
     for (let i = msgs.length - 1; i >= 0; i--) {
       const msg = msgs[i];
       if (msg.role === "assistant" && msg.usage) {
         const u = msg.usage;
-        const used = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+        const used = (u.input ?? 0) + (u.output ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
         if (used <= 0) continue;
         return { used, total: contextWindow };
       }
