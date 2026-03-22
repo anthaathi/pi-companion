@@ -33,6 +33,7 @@ import { Colors, Fonts } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import type { ChatMessage, ToolCallInfo } from "../../types";
 import { ToolCallGroup, groupToolCalls } from "./tool-call-group";
+import { MessageIdContext } from "./visibility-context";
 import { markedDarkOptions, markedLightOptions } from "../../theme";
 
 const WEB_INFO_POPOVER_WIDTH = 260;
@@ -679,6 +680,7 @@ function AssistantMessageComponent({
   ) : null;
 
   return (
+    <MessageIdContext.Provider value={message.id}>
     <Pressable
       accessible={false}
       onHoverIn={handleHoverIn}
@@ -899,6 +901,7 @@ function AssistantMessageComponent({
         />
       ) : null}
     </Pressable>
+    </MessageIdContext.Provider>
   );
 }
 

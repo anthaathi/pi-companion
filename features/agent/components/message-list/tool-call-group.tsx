@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { ChevronDown, ChevronRight, Columns2, Rows2 } from "lucide-react-native";
+import { useIsMessageVisible } from "./visibility-context";
 
 import { Colors, Fonts } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -26,6 +27,8 @@ const SINGLE_VERB: Record<string, string> = {
   crawl: "Crawl",
   subagent: "Sub-agent",
 };
+
+const MAX_VISIBLE_GROUP_ITEMS = 5;
 
 function areToolCallArraysEqual(left: ToolCallInfo[], right: ToolCallInfo[]): boolean {
   if (left === right) return true;
@@ -611,6 +614,7 @@ function ReadToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
   const isRunning = isToolCallActive(tc);
+  const isVisible = useIsMessageVisible();
   const statusLabel = getToolStatusLabel(tc);
   // Stay collapsed while streaming to avoid expensive re-renders on every
   // partial-result delta (the server sends the full file content each time).
@@ -662,7 +666,7 @@ function ReadToolCall({ tc }: { tc: ToolCallInfo }) {
         }
       </Pressable>
 
-      {expanded && (rows.length > 0 || isRunning || !!output) && (
+      {expanded && isVisible && (rows.length > 0 || isRunning || !!output) && (
         <View style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}>
           <View
             style={[
@@ -728,6 +732,7 @@ function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
   const isRunning = isToolCallActive(tc);
+  const isVisible = useIsMessageVisible();
   const statusLabel = getToolStatusLabel(tc);
   const [expanded, setExpanded] = useState(isRunning);
   const diffViewMode = useAppSettingsStore((s) => s.diffViewMode);
@@ -843,7 +848,7 @@ function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
         }
       </Pressable>
 
-      {expanded && (hasData || isRunning || !!newText) && (
+      {expanded && isVisible && (hasData || isRunning || !!newText) && (
         <View
           style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}
           onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
@@ -971,6 +976,7 @@ function EditToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
   const isRunning = isToolCallActive(tc);
+  const isVisible = useIsMessageVisible();
   const statusLabel = getToolStatusLabel(tc);
   const [expanded, setExpanded] = useState(isRunning);
   const diffViewMode = useAppSettingsStore((s) => s.diffViewMode);
@@ -1045,7 +1051,7 @@ function EditToolCall({ tc }: { tc: ToolCallInfo }) {
         }
       </Pressable>
 
-      {expanded && (hasData || isRunning) && (
+      {expanded && isVisible && (hasData || isRunning) && (
         <View
           style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}
           onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
@@ -1642,9 +1648,18 @@ function ToolCallGroupComponent({
   const toggle = useCallback(() => setExpanded((v) => !v), []);
   const groupParts = multiGroupLabelParts(toolName, calls.length);
 
+  const [showAll, setShowAll] = useState(false);
+  const mutedColor = isDark ? "#888" : "#888";
+
   if (calls.length === 1) {
     return <SingleToolCall tc={calls[0]} />;
   }
+
+  const hasMore = calls.length > MAX_VISIBLE_GROUP_ITEMS;
+  const visibleCalls = expanded
+    ? (showAll ? calls : calls.slice(0, MAX_VISIBLE_GROUP_ITEMS))
+    : [];
+  const hiddenCount = calls.length - MAX_VISIBLE_GROUP_ITEMS;
 
   return (
     <View>
@@ -1661,7 +1676,7 @@ function ToolCallGroupComponent({
             <Text style={[styles.label, { color: textColor }]}>{groupParts.after}</Text>
           ) : null}
           {groupStatusLabel ? (
-            <Text style={[styles.status, { color: isDark ? "#888" : "#888" }]}>
+            <Text style={[styles.status, { color: mutedColor }]}>
               {" "}
               {groupStatusLabel}
             </Text>
@@ -1671,9 +1686,19 @@ function ToolCallGroupComponent({
 
       {expanded && (
         <View style={styles.expandedList}>
-          {calls.map((tc) => (
+          {visibleCalls.map((tc) => (
             <SingleToolCall key={tc.id} tc={tc} />
           ))}
+          {hasMore && !showAll && (
+            <Pressable
+              style={styles.showMoreBtn}
+              onPress={() => setShowAll(true)}
+            >
+              <Text style={[styles.showMoreText, { color: mutedColor }]}>
+                Show {hiddenCount} more…
+              </Text>
+            </Pressable>
+          )}
         </View>
       )}
     </View>
@@ -1771,6 +1796,14 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
     paddingTop: 6,
     gap: 4,
+  },
+  showMoreBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  showMoreText: {
+    fontSize: 12,
+    fontFamily: Fonts.sans,
   },
   expandedOutput: {
     paddingLeft: 8,

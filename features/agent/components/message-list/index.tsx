@@ -7,6 +7,7 @@ import {
   Text,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ViewToken,
   View,
 } from "react-native";
 import { ArrowDown, CheckCircle2 } from "lucide-react-native";
@@ -32,10 +33,14 @@ import type { ChatMessage, ToolCallInfo } from "../../types";
 import { AssistantMessage } from "./assistant-message";
 import { SystemMessage } from "./system-message";
 import { UserMessage } from "./user-message";
+import { VisibleMessagesContext } from "./visibility-context";
 
 
 const BOTTOM_THRESHOLD = 300;
 const INITIAL_BATCH_SIZE = 10;
+
+const EMPTY_SET = new Set<string>();
+const VIEWABILITY_CONFIG = { viewAreaCoveragePercentThreshold: 1 };
 
 interface MergedMessageItem {
   message: ChatMessage;
@@ -545,6 +550,19 @@ export function MessageList({ sessionId }: { sessionId: string }) {
   const showScrollButtonRef = useRef(false);
   const contentDirtyRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [visibleMessageIds, setVisibleMessageIds] = useState<Set<string>>(EMPTY_SET);
+
+  const handleViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const ids = new Set<string>();
+      for (const token of viewableItems) {
+        if (token.isViewable && token.item?.message?.id) {
+          ids.add(token.item.message.id);
+        }
+      }
+      setVisibleMessageIds(ids);
+    },
+  ).current;
 
   // Turn-complete haptic + banner via agent_end event
   const [bannerInfo, setBannerInfo] = useState<BannerInfo | null>(null);
@@ -745,6 +763,7 @@ export function MessageList({ sessionId }: { sessionId: string }) {
   }
 
   return (
+    <VisibleMessagesContext.Provider value={visibleMessageIds}>
     <View style={styles.container}>
       <FlatList
         ref={listRef}
@@ -757,6 +776,8 @@ export function MessageList({ sessionId }: { sessionId: string }) {
         inverted
         onScroll={handleScroll}
         onContentSizeChange={handleContentSizeChange}
+        onViewableItemsChanged={handleViewableItemsChanged}
+        viewabilityConfig={VIEWABILITY_CONFIG}
         scrollEventThrottle={16}
         initialNumToRender={INITIAL_BATCH_SIZE}
         maxToRenderPerBatch={6}
@@ -794,6 +815,7 @@ export function MessageList({ sessionId }: { sessionId: string }) {
         </Pressable>
       ) : null}
     </View>
+    </VisibleMessagesContext.Provider>
   );
 }
 
