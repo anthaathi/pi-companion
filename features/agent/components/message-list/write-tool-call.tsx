@@ -146,6 +146,7 @@ export function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
           path={path}
           ops={ops}
           previewRows={previewRows}
+          infoText={baselineLabel}
         />
       )}
 

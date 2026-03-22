@@ -14,6 +14,7 @@ import {
   buildInline,
   buildSideBySide,
   editStyles,
+  toolMetaStyles,
   type CodeRow,
 } from "./code-preview";
 
@@ -23,8 +24,9 @@ interface DiffBottomSheetProps {
   title: string;
   path: string;
   ops: DiffOp[];
-  /** For write tool — preview rows when no diff baseline */
+  /** For write tool - preview rows when no diff baseline */
   previewRows?: CodeRow[];
+  infoText?: string | null;
   addBg?: string;
 }
 
@@ -35,6 +37,7 @@ export function DiffBottomSheet({
   path,
   ops,
   previewRows,
+  infoText,
   addBg,
 }: DiffBottomSheetProps) {
   const colorScheme = useColorScheme() ?? "light";
@@ -134,41 +137,51 @@ export function DiffBottomSheet({
           </View>
 
           {/* Content */}
-          <ScrollView style={styles.content} nestedScrollEnabled>
+          <View style={styles.content}>
+            {infoText ? (
+              <View style={toolMetaStyles.banner}>
+                <Text style={[toolMetaStyles.text, { color: mutedColor }]}>{infoText}</Text>
+              </View>
+            ) : null}
+
             {hasOps && viewMode === "split" ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <SplitDiffView
-                  rows={sideBySideRows}
-                  containerWidth={400}
-                  isDark={isDark}
-                  removeBg={removeBg}
-                  addBg={diffAddBg}
-                  emptyBg={emptyBg}
-                  lineNoBg={lineNoBg}
-                  lineNoColor={lineNoColor}
-                  dividerColor={dividerColor}
-                />
+              <ScrollView style={styles.scrollArea} nestedScrollEnabled>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <SplitDiffView
+                    rows={sideBySideRows}
+                    containerWidth={400}
+                    isDark={isDark}
+                    removeBg={removeBg}
+                    addBg={diffAddBg}
+                    emptyBg={emptyBg}
+                    lineNoBg={lineNoBg}
+                    lineNoColor={lineNoColor}
+                    dividerColor={dividerColor}
+                  />
+                </ScrollView>
               </ScrollView>
             ) : hasOps && viewMode === "inline" ? (
-              <View>
-                {inlineRows.map((row, i) => {
-                  const rowBg = row.type === "added" ? diffAddBg : row.type === "removed" ? removeBg : undefined;
-                  const prefix = row.type === "added" ? "+" : row.type === "removed" ? "-" : " ";
-                  const prefixColor = row.type === "added" ? addColor : row.type === "removed" ? removeColor : mutedColor;
-                  return (
-                    <View key={i} style={[editStyles.inlineRow, rowBg ? { backgroundColor: rowBg } : undefined]}>
-                      <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
-                        <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.oldLineNo ?? ""}</Text>
+              <ScrollView style={styles.scrollArea} nestedScrollEnabled>
+                <View>
+                  {inlineRows.map((row, i) => {
+                    const rowBg = row.type === "added" ? diffAddBg : row.type === "removed" ? removeBg : undefined;
+                    const prefix = row.type === "added" ? "+" : row.type === "removed" ? "-" : " ";
+                    const prefixColor = row.type === "added" ? addColor : row.type === "removed" ? removeColor : mutedColor;
+                    return (
+                      <View key={i} style={[editStyles.inlineRow, rowBg ? { backgroundColor: rowBg } : undefined]}>
+                        <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}> 
+                          <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.oldLineNo ?? ""}</Text>
+                        </View>
+                        <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}> 
+                          <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.newLineNo ?? ""}</Text>
+                        </View>
+                        <Text style={[editStyles.prefix, { color: prefixColor }]}>{prefix}</Text>
+                        <TokenizedText line={row.text} isDark={isDark} style={editStyles.lineText} />
                       </View>
-                      <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
-                        <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.newLineNo ?? ""}</Text>
-                      </View>
-                      <Text style={[editStyles.prefix, { color: prefixColor }]}>{prefix}</Text>
-                      <TokenizedText line={row.text} isDark={isDark} style={editStyles.lineText} />
-                    </View>
-                  );
-                })}
-              </View>
+                    );
+                  })}
+                </View>
+              </ScrollView>
             ) : previewRows && previewRows.length > 0 ? (
               <CodePreview
                 rows={previewRows}
@@ -177,8 +190,12 @@ export function DiffBottomSheet({
                 lineNoColor={lineNoColor}
                 rowBackgroundColor={diffAddBg}
               />
-            ) : null}
-          </ScrollView>
+            ) : (
+              <View style={editStyles.pendingState}>
+                <Text style={[editStyles.pendingText, { color: mutedColor }]}>No preview available</Text>
+              </View>
+            )}
+          </View>
         </Animated.View>
       </View>
     </Modal>
@@ -247,6 +264,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   content: {
+    flex: 1,
+  },
+  scrollArea: {
     flex: 1,
   },
 });
