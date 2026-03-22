@@ -3,6 +3,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { ChevronDown, ChevronRight, Columns2, Rows2 } from "lucide-react-native";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useResponsiveLayout } from "@/features/navigation/hooks/use-responsive-layout";
 import { useAppSettingsStore, type DiffViewMode } from "@/features/settings/store";
 import { useFileRead } from "@/features/workspace/hooks/use-file-list";
 import type { ToolCallInfo } from "../../types";
@@ -21,6 +22,7 @@ import {
   lcsLineDiff,
   toolMetaStyles,
 } from "./code-preview";
+import { DiffBottomSheet } from "./diff-bottom-sheet";
 
 type WriteBaselineState =
   | { kind: "content"; content: string }
@@ -29,10 +31,12 @@ type WriteBaselineState =
 export function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
+  const { isWideScreen } = useResponsiveLayout();
   const isRunning = isToolCallActive(tc);
   const isVisible = useIsMessageVisible();
   const statusLabel = getToolStatusLabel(tc);
   const [expanded, setExpanded] = useState(isRunning);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const diffViewMode = useAppSettingsStore((s) => s.diffViewMode);
   const updateSettings = useAppSettingsStore((s) => s.update);
   const viewMode = diffViewMode;
@@ -109,7 +113,14 @@ export function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
 
   return (
     <View>
-      <Pressable style={styles.row} onPress={() => { animateLayout(); setExpanded((v) => !v); }}>
+      <Pressable style={styles.row} onPress={() => {
+        if (!isWideScreen && (hasData || !!newText)) {
+          setSheetOpen(true);
+        } else {
+          animateLayout();
+          setExpanded((v) => !v);
+        }
+      }}>
         <Text style={styles.singleLine} numberOfLines={1}>
           <Text style={[styles.verb, { color: textColor }]}>Write</Text>
           <Text style={[styles.detail, { color: mutedColor }]}> {fileName}</Text>
@@ -120,13 +131,26 @@ export function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
             <Text style={[styles.status, { color: mutedColor }]}> {statusLabel}</Text>
           ) : null}
         </Text>
-        {expanded
+        {!isWideScreen ? null : expanded
           ? <ChevronDown size={13} color={mutedColor} strokeWidth={1.8} />
           : <ChevronRight size={13} color={mutedColor} strokeWidth={1.8} />
         }
       </Pressable>
 
-      {expanded && isVisible && (hasData || isRunning || !!newText) && (
+      {/* Mobile: bottom sheet */}
+      {!isWideScreen && sheetOpen && (
+        <DiffBottomSheet
+          visible
+          onClose={() => setSheetOpen(false)}
+          title={`Write ${fileName}`}
+          path={path}
+          ops={ops}
+          previewRows={previewRows}
+        />
+      )}
+
+      {/* Desktop: inline */}
+      {isWideScreen && expanded && isVisible && (hasData || isRunning || !!newText) && (
         <View
           style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}
           onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
