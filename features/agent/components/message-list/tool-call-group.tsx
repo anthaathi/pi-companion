@@ -1646,11 +1646,9 @@ function ToolCallGroupComponent({
     return <SingleToolCall tc={calls[0]} />;
   }
 
-  const collapsedOnly = toolName === "read";
-
   return (
     <View>
-      <Pressable style={styles.row} onPress={collapsedOnly ? undefined : toggle} disabled={collapsedOnly}>
+      <Pressable style={styles.row} onPress={toggle}>
         <View style={styles.animatedLabelRow}>
           {groupParts.before ? (
             <Text style={[styles.label, { color: textColor }]}>{groupParts.before}</Text>
@@ -1671,10 +1669,10 @@ function ToolCallGroupComponent({
         </View>
       </Pressable>
 
-      {!collapsedOnly && expanded && (
+      {expanded && (
         <View style={styles.expandedList}>
           {calls.map((tc) => (
-            <ToolCallCard key={tc.id} toolCall={tc} />
+            <SingleToolCall key={tc.id} tc={tc} />
           ))}
         </View>
       )}
