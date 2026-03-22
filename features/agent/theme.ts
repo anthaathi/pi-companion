@@ -89,8 +89,8 @@ function createStyles(colors: {
       paddingVertical: 4,
     },
     strong: {
-      fontFamily: Fonts.sansBold,
-      fontWeight: "bold",
+      fontFamily: Fonts.sansSemiBold,
+      fontWeight: "600",
       color: colors.textStrong,
     },
     em: {
