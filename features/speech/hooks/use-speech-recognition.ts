@@ -8,6 +8,7 @@ interface UseSpeechRecognitionResult {
   start: () => Promise<void>;
   stop: () => Promise<void>;
   error: string | null;
+  clearError: () => void;
   audioLevel: number;
 }
 
@@ -18,6 +19,7 @@ export function useSpeechRecognition(
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
+  const clearError = useCallback(() => setError(null), []);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const levelFrameRef = useRef<number>(0);
 
@@ -459,5 +461,5 @@ export function useSpeechRecognition(
     }
   }, [mode, useRealtimeWs, stopApiWeb, stopWsRealtime, stopApiNative, stopMetering]);
 
-  return { isListening, start, stop, error, audioLevel };
+  return { isListening, start, stop, error, clearError, audioLevel };
 }

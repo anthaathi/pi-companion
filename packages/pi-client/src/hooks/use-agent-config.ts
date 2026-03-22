@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePiClient } from "./context";
 import type { ModelInfo, AgentStateData } from "../types/stream-events";
 import type { AgentMode } from "../types/chat-message";
@@ -102,17 +102,54 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
   const setModel = useCallback(
     async (params: { provider: string; modelId: string }) => {
       if (!sessionId) return;
-      await client.setModel(sessionId, params);
-      load();
+
+      const selectedModel = models?.find(
+        (model) =>
+          model.id === params.modelId &&
+          (model.provider ?? "unknown") === params.provider,
+      );
+
+      setState((prev) =>
+        prev
+          ? {
+              ...prev,
+              model: {
+                ...prev.model,
+                id: params.modelId,
+                provider: params.provider,
+                name: selectedModel?.name ?? selectedModel?.id ?? params.modelId,
+              },
+            }
+          : prev,
+      );
+
+      try {
+        await client.setModel(sessionId, params);
+      } catch {
+        load();
+      }
     },
-    [client, sessionId, load],
+    [client, sessionId, load, models],
   );
 
   const setThinkingLevel = useCallback(
     async (level: string) => {
       if (!sessionId) return;
-      await client.setThinkingLevel(sessionId, level);
-      load();
+
+      setState((prev) =>
+        prev
+          ? {
+              ...prev,
+              thinkingLevel: level,
+            }
+          : prev,
+      );
+
+      try {
+        await client.setThinkingLevel(sessionId, level);
+      } catch {
+        load();
+      }
     },
     [client, sessionId, load],
   );
@@ -120,8 +157,21 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
   const setMode = useCallback(
     async (mode: AgentMode) => {
       if (!sessionId) return;
-      await client.prompt(sessionId, mode === "plan" ? "/plan" : "/chat");
-      load();
+
+      setState((prev) =>
+        prev
+          ? {
+              ...prev,
+              mode,
+            }
+          : prev,
+      );
+
+      try {
+        await client.prompt(sessionId, mode === "plan" ? "/plan" : "/chat");
+      } catch {
+        load();
+      }
     },
     [client, sessionId, load],
   );

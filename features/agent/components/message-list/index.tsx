@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -8,24 +9,31 @@ import {
   type NativeSyntheticEvent,
   View,
 } from "react-native";
-import { ArrowDown } from "lucide-react-native";
+import { ArrowDown, CheckCircle2 } from "lucide-react-native";
 import Animated, {
+  SlideInUp,
+  SlideOutUp,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withTiming,
   Easing,
 } from "react-native-reanimated";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
+
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Fonts } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { useAgentSession } from "@pi-ui/client";
+import { useAgentSession, useTurnEnd } from "@pi-ui/client";
+import { useWorkspaceStore } from "@/features/workspace/store";
 import type { ChatMessage, ToolCallInfo } from "../../types";
 import { AssistantMessage } from "./assistant-message";
 import { SystemMessage } from "./system-message";
 import { UserMessage } from "./user-message";
 
-const EMPTY_MESSAGES: ChatMessage[] = [];
+
 const BOTTOM_THRESHOLD = 300;
 const INITIAL_BATCH_SIZE = 10;
 
@@ -410,13 +418,124 @@ const shimmerStyles = StyleSheet.create({
   },
 });
 
+const BANNER_DURATION = 4000;
+
+interface BannerInfo {
+  sessionId: string;
+  workspaceId?: string;
+  workspaceTitle: string;
+  sessionLabel: string;
+}
+
+function TurnCompleteBanner({
+  info,
+  isDark,
+  onView,
+}: {
+  info: BannerInfo;
+  isDark: boolean;
+  onView: () => void;
+}) {
+  const bg = isDark ? "#1A2E1A" : "#E8F5E9";
+  const textColor = isDark ? "#C8E6C9" : "#2E7D32";
+  const mutedColor = isDark ? "#81C784" : "#388E3C";
+  const iconColor = isDark ? "#66BB6A" : "#43A047";
+  const btnBg = isDark ? "#2E7D32" : "#43A047";
+
+  return (
+    <Animated.View
+      entering={SlideInUp.duration(300)}
+      exiting={SlideOutUp.duration(200)}
+      style={[bannerStyles.container, { backgroundColor: bg }]}
+    >
+      <View style={bannerStyles.content}>
+        <CheckCircle2 size={15} color={iconColor} strokeWidth={2} />
+        <View style={bannerStyles.textWrap}>
+          <Text style={[bannerStyles.title, { color: textColor }]} numberOfLines={1}>
+            {info.workspaceTitle}
+          </Text>
+          <Text style={[bannerStyles.subtitle, { color: mutedColor }]} numberOfLines={1}>
+            {info.sessionLabel}
+          </Text>
+        </View>
+        <Pressable style={[bannerStyles.viewBtn, { backgroundColor: btnBg }]} onPress={onView}>
+          <Text style={bannerStyles.viewBtnText}>View</Text>
+        </Pressable>
+      </View>
+    </Animated.View>
+  );
+}
+
+const bannerStyles = StyleSheet.create({
+  container: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  content: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  textWrap: {
+    flex: 1,
+    gap: 1,
+  },
+  title: {
+    fontSize: 13,
+    fontFamily: Fonts.sansSemiBold,
+    fontWeight: "600",
+  },
+  subtitle: {
+    fontSize: 11,
+    fontFamily: Fonts.sans,
+  },
+  viewBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  viewBtnText: {
+    fontSize: 12,
+    fontFamily: Fonts.sansSemiBold,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+});
+
+function findSessionName(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string | undefined,
+  targetSessionId: string,
+): string | null {
+  if (!workspaceId) return null;
+  const cache = queryClient.getQueryData<{ pages: { items: { id: string; display_name?: string | null }[] }[] }>(
+    ["sessions", workspaceId],
+  );
+  if (!cache?.pages) return null;
+  for (const page of cache.pages) {
+    const match = page.items.find((s) => s.id === targetSessionId);
+    if (match?.display_name) return match.display_name;
+  }
+  return null;
+}
+
 export function MessageList({ sessionId }: { sessionId: string }) {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
+  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const session = useAgentSession(sessionId);
   const messages = session.messages as ChatMessage[];
   const isStreaming = session.isStreaming;
+
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const sessionWorkspaceById = useWorkspaceStore((s) => s.sessionWorkspaceById);
 
   const listRef = useRef<FlatList<VisibleMessageItem>>(null);
   const isNearBottomRef = useRef(true);
@@ -425,6 +544,63 @@ export function MessageList({ sessionId }: { sessionId: string }) {
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showScrollButtonRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+
+  // Turn-complete haptic + banner via agent_end event
+  const [bannerInfo, setBannerInfo] = useState<BannerInfo | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useTurnEnd(useCallback((event) => {
+    const isSameSession = event.sessionId === sessionId;
+
+    // Haptic only when viewing the session that just finished
+    if (isSameSession && Platform.OS !== "web") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    }
+
+    // Skip banner if viewing the session that just completed
+    if (isSameSession) return;
+
+    // Resolve workspace title and session name
+    const wsId = event.workspaceId ?? sessionWorkspaceById[event.sessionId];
+    const ws = wsId ? workspaces.find((w) => w.id === wsId) : undefined;
+    const workspaceTitle = ws?.title ?? "Session";
+    const sessionName = findSessionName(queryClient, wsId, event.sessionId);
+    const sessionLabel = sessionName
+      ? `Ready · ${sessionName}`
+      : "Ready";
+
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    setBannerInfo({
+      sessionId: event.sessionId,
+      workspaceId: wsId,
+      workspaceTitle,
+      sessionLabel,
+    });
+    bannerTimerRef.current = setTimeout(() => {
+      setBannerInfo(null);
+      bannerTimerRef.current = null;
+    }, BANNER_DURATION);
+  }, [sessionId, workspaces, sessionWorkspaceById, queryClient]));
+
+  const handleBannerView = useCallback(() => {
+    if (!bannerInfo) return;
+    // Clear banner
+    setBannerInfo(null);
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+      bannerTimerRef.current = null;
+    }
+    // Navigate to the completed session
+    if (bannerInfo.workspaceId && bannerInfo.workspaceId !== "__chat__") {
+      router.navigate(
+        `/workspace/${bannerInfo.workspaceId}/s/${bannerInfo.sessionId}` as any,
+      );
+    } else {
+      router.navigate(
+        `/chat/${bannerInfo.sessionId}` as any,
+      );
+    }
+  }, [bannerInfo, router]);
 
   const setScrollButtonVisible = useCallback((nextVisible: boolean) => {
     if (showScrollButtonRef.current === nextVisible) {
@@ -488,6 +664,11 @@ export function MessageList({ sessionId }: { sessionId: string }) {
       clearTimeout(scrollTimerRef.current);
       scrollTimerRef.current = null;
     }
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+      bannerTimerRef.current = null;
+    }
+    setBannerInfo(null);
   }, [sessionId, setScrollButtonVisible]);
 
   useEffect(() => {
@@ -512,6 +693,9 @@ export function MessageList({ sessionId }: { sessionId: string }) {
     return () => {
       if (scrollTimerRef.current) {
         clearTimeout(scrollTimerRef.current);
+      }
+      if (bannerTimerRef.current) {
+        clearTimeout(bannerTimerRef.current);
       }
     };
   }, []);
@@ -571,6 +755,10 @@ export function MessageList({ sessionId }: { sessionId: string }) {
         ListHeaderComponent={footer}
         showsVerticalScrollIndicator={false}
       />
+
+      {bannerInfo ? (
+        <TurnCompleteBanner info={bannerInfo} isDark={isDark} onView={handleBannerView} />
+      ) : null}
 
       {showScrollButton ? (
         <Pressable

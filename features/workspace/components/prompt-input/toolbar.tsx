@@ -19,7 +19,7 @@ import { THINKING_LEVELS, FlatModel, ThinkingLevel } from './constants';
 import { matchesModelSearch } from './model-search';
 import { usePromptTheme } from './use-theme-colors';
 import { ProviderIcon } from './provider-icons';
-import { useAgentConfig } from '@pi-ui/client';
+import type { AgentConfigHandle } from '@pi-ui/client';
 import type { AgentMode } from '@/features/agent/mode';
 import { useAppMode } from '@/hooks/use-app-mode';
 
@@ -32,6 +32,7 @@ interface ToolbarProps {
   skeleton?: React.ReactNode;
   modeLabel?: string | null;
   ready?: boolean;
+  config: AgentConfigHandle;
 }
 
 type DropdownType = null | 'model' | 'effort';
@@ -53,13 +54,14 @@ function ToolbarComponent({
   skeleton = null,
   modeLabel = null,
   ready = true,
+  config,
 }: ToolbarProps) {
   const theme = usePromptTheme();
   const appMode = useAppMode();
   const modelScrollRef = useRef<ScrollView>(null);
   const modelSearchRef = useRef<TextInput>(null);
 
-  const config = useAgentConfig(ready ? (sessionId ?? null) : null);
+  // config is passed in from PromptInput (shared instance)
   const models = config.models;
   const agentState = config.state;
   const configError = config.error;

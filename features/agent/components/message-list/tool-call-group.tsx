@@ -41,89 +41,33 @@ function areToolCallArraysEqual(left: ToolCallInfo[], right: ToolCallInfo[]): bo
 }
 
 function AnimatedNumber({ value, style }: { value: number; style?: any }) {
+  const opacity = useRef(new Animated.Value(1)).current;
+  const [displayValue, setDisplayValue] = useState(value);
   const prevRef = useRef(value);
-  const slideOut = useRef(new Animated.Value(0)).current;
-  const slideIn = useRef(new Animated.Value(0)).current;
-  const [display, setDisplay] = useState({ prev: value, next: value });
-  const animating = useRef(false);
+  const numberStyle = [style, { fontVariant: ["tabular-nums"] as const }];
 
   useEffect(() => {
     if (value === prevRef.current) return;
-    const prev = prevRef.current;
     prevRef.current = value;
-    setDisplay({ prev, next: value });
-    animating.current = true;
-    slideOut.setValue(0);
-    slideIn.setValue(1);
-    Animated.parallel([
-      Animated.timing(slideOut, {
-        toValue: -1,
-        duration: 250,
+
+    Animated.timing(opacity, {
+      toValue: 0,
+      duration: 100,
+      useNativeDriver: true,
+    }).start(() => {
+      setDisplayValue(value);
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 150,
         useNativeDriver: true,
-      }),
-      Animated.timing(slideIn, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      animating.current = false;
-      setDisplay({ prev: value, next: value });
+      }).start();
     });
-  }, [value, slideOut, slideIn]);
-
-  const height = 18;
-
-  if (display.prev === display.next && !animating.current) {
-    return <Text style={style}>{display.next}</Text>;
-  }
+  }, [value, opacity]);
 
   return (
-    <View style={{ height, overflow: "hidden", justifyContent: "center" }}>
-      <Animated.Text
-        style={[
-          style,
-          {
-            position: "absolute",
-            opacity: slideOut.interpolate({
-              inputRange: [-1, 0],
-              outputRange: [0, 1],
-            }),
-            transform: [
-              {
-                translateY: slideOut.interpolate({
-                  inputRange: [-1, 0],
-                  outputRange: [-height, 0],
-                }),
-              },
-            ],
-          },
-        ]}
-      >
-        {display.prev}
-      </Animated.Text>
-      <Animated.Text
-        style={[
-          style,
-          {
-            opacity: slideIn.interpolate({
-              inputRange: [0, 1],
-              outputRange: [1, 0],
-            }),
-            transform: [
-              {
-                translateY: slideIn.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, height],
-                }),
-              },
-            ],
-          },
-        ]}
-      >
-        {display.next}
-      </Animated.Text>
-    </View>
+    <Animated.Text style={[numberStyle, { opacity }]}>
+      {displayValue}
+    </Animated.Text>
   );
 }
 
@@ -238,6 +182,14 @@ function BashToolCall({ tc }: { tc: ToolCallInfo }) {
           backgroundColor: isDark ? "#0D0D0D" : "#F6F6F6",
           borderColor: isDark ? "#2A2A2A" : "#E8E8E8",
         }]}>
+          {command ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <Text style={bashStyles.commandLine} selectable numberOfLines={1}>
+                <Text style={[bashStyles.prompt, { color: isDark ? "#3FB950" : "#1A7F37" }]}>$ </Text>
+                <Text style={[bashStyles.command, { color: textColor }]}>{command}</Text>
+              </Text>
+            </ScrollView>
+          ) : null}
           <ScrollView style={bashStyles.scroll} nestedScrollEnabled>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {output ? (
@@ -254,9 +206,6 @@ function BashToolCall({ tc }: { tc: ToolCallInfo }) {
                     : output}
                 </Text>
               ) : null}
-              {isRunning && !output && (
-                <Text style={[bashStyles.output, { color: isDark ? "#8B8B8B" : "#999999" }]}>Running…</Text>
-              )}
             </ScrollView>
           </ScrollView>
         </View>

@@ -1,8 +1,7 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Animated as RNAnimated,
   Keyboard,
   Modal,
   Platform,
@@ -12,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
 import {
   SafeAreaView,
@@ -308,6 +308,7 @@ function ServerFormSheet({
   error?: string | null;
 }) {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const colorScheme = useColorScheme() ?? "light";
   const colors = Colors[colorScheme];
 
@@ -319,11 +320,16 @@ function ServerFormSheet({
 
   const translateY = useSharedValue(SHEET_HEIGHT);
   const overlayOpacity = useSharedValue(0);
-  const keyboardOffset = useRef(new RNAnimated.Value(0)).current;
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const textPrimary = isDark ? "#fefdfd" : "#1a1a1a";
   const sheetBg = isDark ? "#1e1e1e" : "#FFFFFF";
   const sheetBottomPadding = Math.max(insets.bottom, 12);
+  const keyboardInset = Math.max(0, keyboardHeight - insets.bottom);
+  const maxVisibleSheetHeight = Math.max(
+    280,
+    windowHeight - keyboardInset - insets.top - 12,
+  );
   const canSave = name.trim() && address.trim() && !loading;
 
   useEffect(() => {
@@ -338,48 +344,33 @@ function ServerFormSheet({
     } else {
       translateY.value = withTiming(SHEET_HEIGHT, TIMING_CONFIG);
       overlayOpacity.value = withTiming(0, TIMING_CONFIG);
+      setKeyboardHeight(0);
     }
   }, [visible, initial, translateY, overlayOpacity]);
 
   useEffect(() => {
-    if (Platform.OS === "web") return;
+    if (Platform.OS === "web" || Platform.OS === "android") {
+      setKeyboardHeight(0);
+      return;
+    }
 
-    const showEvent =
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent =
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showEvent = "keyboardWillShow";
+    const hideEvent = "keyboardWillHide";
 
     const showSub = Keyboard.addListener(showEvent, (event) => {
       if (!visible) return;
-
-      RNAnimated.spring(keyboardOffset, {
-        toValue: event.endCoordinates.height,
-        tension: 160,
-        friction: 20,
-        useNativeDriver: true,
-      }).start();
+      setKeyboardHeight(event.endCoordinates.height);
     });
 
     const hideSub = Keyboard.addListener(hideEvent, () => {
-      RNAnimated.spring(keyboardOffset, {
-        toValue: 0,
-        tension: 160,
-        friction: 20,
-        useNativeDriver: true,
-      }).start();
+      setKeyboardHeight(0);
     });
 
     return () => {
       showSub.remove();
       hideSub.remove();
     };
-  }, [keyboardOffset, visible]);
-
-  useEffect(() => {
-    if (!visible) {
-      keyboardOffset.setValue(0);
-    }
-  }, [keyboardOffset, visible]);
+  }, [visible]);
 
   const dismiss = useCallback(() => {
     translateY.value = withTiming(SHEET_HEIGHT, TIMING_CONFIG);
@@ -423,8 +414,6 @@ function ServerFormSheet({
     });
   };
 
-  const keyboardLift = RNAnimated.multiply(keyboardOffset, -1);
-
   return (
     <Modal
       visible={visible}
@@ -448,14 +437,10 @@ function ServerFormSheet({
           />
         </Animated.View>
 
-        <RNAnimated.View
-          {...(Platform.OS !== "web"
-            ? { pointerEvents: "box-none" as const }
-            : {})}
+        <View
           style={[
             sheetStyles.keyboardAvoider,
-            { transform: [{ translateY: keyboardLift }] },
-            Platform.OS === "web" && ({ pointerEvents: "none" } as any),
+            { paddingBottom: keyboardInset },
           ]}
         >
           <GestureDetector gesture={panGesture}>
@@ -464,10 +449,10 @@ function ServerFormSheet({
                 sheetStyles.sheet,
                 {
                   backgroundColor: sheetBg,
-                  paddingBottom: sheetBottomPadding,
+                  paddingBottom: keyboardHeight > 0 ? 12 : sheetBottomPadding,
+                  maxHeight: Math.min(SHEET_HEIGHT, maxVisibleSheetHeight),
                 },
                 sheetStyle,
-                Platform.OS === "web" && ({ pointerEvents: "auto" } as any),
               ]}
             >
               <View style={sheetStyles.handleBar}>
@@ -545,7 +530,7 @@ function ServerFormSheet({
               </ScrollView>
             </Animated.View>
           </GestureDetector>
-        </RNAnimated.View>
+        </View>
       </View>
     </Modal>
   );
@@ -1155,8 +1140,7 @@ const styles = StyleSheet.create({
 
 const sheetStyles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 100,
+    flex: 1,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,

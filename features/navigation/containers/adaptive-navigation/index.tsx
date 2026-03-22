@@ -503,7 +503,7 @@ const styles = StyleSheet.create({
   },
   resizeHandle: {
     width: Platform.OS === "web" ? 4 : 12,
-    cursor: "col-resize",
+    cursor: "col-resize" as any,
     alignSelf: "stretch",
     backgroundColor: "transparent",
     marginRight: Platform.OS === "web" ? 0 : -6,

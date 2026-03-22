@@ -18,7 +18,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Fonts } from "@/constants/theme";
 import { formatAgentModeLabel } from "@/features/agent/mode";
-import { useAgentSession } from "@pi-ui/client";
+import { useAgentSession, useAgentConfig } from "@pi-ui/client";
 import { useResponsiveLayout } from "@/features/navigation/hooks/use-responsive-layout";
 import { useSpeechRecognition } from "@/features/speech/hooks/use-speech-recognition";
 import { useSpeechSettingsStore } from "@/features/speech/store";
@@ -225,6 +225,7 @@ export function PromptInput({
   const inputDisabled = !!disabled && !canComposeWhileDisabled;
   const sendDisabled = !!disabled;
   const { mode: streamedMode } = useAgentSession(sessionId ?? null);
+  const agentConfig = useAgentConfig(sessionReady ? (sessionId ?? null) : null);
 
   const { data: backendCommands } = useQuery({
     queryKey: ["slash-commands", sessionId],
@@ -256,7 +257,8 @@ export function PromptInput({
   const [toolbarPopoverOpen, setToolbarPopoverOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [entryDone, setEntryDone] = useState(false);
-  const toolbarVisible = isWideScreen || (!hideBottomForKeyboard && !mobileSheet);
+  const toolbarHiddenKeepLayout = !isWideScreen && !!mobileSheet;
+  const toolbarCollapsed = !isWideScreen && hideBottomForKeyboard;
   const toolbarOverlap = Platform.OS === "web" || isWideScreen ? -4 : -1;
   const toolbarSkeleton = useMemo(
     () => <ToolbarSkeleton isDark={theme.isDark} />,
@@ -337,6 +339,7 @@ export function PromptInput({
     start: startListening,
     stop: stopListening,
     error: speechError,
+    clearError: clearSpeechError,
     audioLevel,
   } = useSpeechRecognition(handleSpeechInterim, handleSpeechFinal);
 
@@ -707,7 +710,7 @@ export function PromptInput({
       {/* Speech error */}
       {speechError && (
         <Pressable
-          onPress={() => {}}
+          onPress={clearSpeechError}
           style={[
             styles.speechError,
             { backgroundColor: theme.isDark ? "#3a1a1a" : "#FEE2E2" },
@@ -895,29 +898,30 @@ export function PromptInput({
         </View>
       </Animated.View>
 
-      {toolbarVisible && (
-        <View
-          style={[
-            styles.bottomControlsWrap,
-            toolbarPopoverOpen && styles.bottomControlsWrapElevated,
-          ]}
-        >
-          <Toolbar
-            sessionId={sessionId}
-            isWideScreen={isWideScreen}
-            onOpenMobileSheet={setMobileSheet}
-            onDropdownOpenChange={setToolbarPopoverOpen}
-            inputRef={inputRef}
-            skeleton={toolbarSkeleton}
-            modeLabel={
-              sessionId && sessionReady && streamedMode
-                ? formatAgentModeLabel(streamedMode)
-                : null
-            }
-            ready={!!sessionReady && !!sessionId}
-          />
-        </View>
-      )}
+      <View
+        style={[
+          styles.bottomControlsWrap,
+          toolbarPopoverOpen && styles.bottomControlsWrapElevated,
+          toolbarHiddenKeepLayout && styles.bottomControlsHidden,
+          toolbarCollapsed && styles.bottomControlsCollapsed,
+        ]}
+      >
+        <Toolbar
+          sessionId={sessionId}
+          isWideScreen={isWideScreen}
+          onOpenMobileSheet={setMobileSheet}
+          onDropdownOpenChange={setToolbarPopoverOpen}
+          inputRef={inputRef}
+          skeleton={toolbarSkeleton}
+          modeLabel={
+            sessionId && sessionReady && streamedMode
+              ? formatAgentModeLabel(streamedMode)
+              : null
+          }
+          ready={!!sessionReady && !!sessionId}
+          config={agentConfig}
+        />
+      </View>
 
       {/* Mobile bottom sheets */}
       {sessionReady && mobileSheet === "model" && (
@@ -925,6 +929,7 @@ export function PromptInput({
           visible
           sessionId={sessionId}
           onClose={closeMobileSheet}
+          config={agentConfig}
         />
       )}
       {sessionReady && mobileSheet === "effort" && (
@@ -932,6 +937,7 @@ export function PromptInput({
           visible
           sessionId={sessionId}
           onClose={closeMobileSheet}
+          config={agentConfig}
         />
       )}
     </Animated.View>
@@ -1042,5 +1048,15 @@ const styles = StyleSheet.create({
   },
   bottomControlsWrapElevated: {
     zIndex: Platform.OS === "android" ? 12 : 12,
+  },
+  bottomControlsHidden: {
+    opacity: 0,
+    pointerEvents: "none" as const,
+  },
+  bottomControlsCollapsed: {
+    height: 0,
+    overflow: "hidden" as const,
+    opacity: 0,
+    pointerEvents: "none" as const,
   },
 });

@@ -12,17 +12,6 @@ type ParsedToolArguments = {
   task?: string;
 };
 
-const TOOL_STATUS_LABELS: Record<string, string> = {
-  read: "Reading...",
-  edit: "Editing...",
-  write: "Writing...",
-  bash: "Running...",
-  python: "Running...",
-  search: "Searching...",
-  scrape: "Scraping...",
-  crawl: "Crawling...",
-  subagent: "",
-};
 
 function decodeEscapedChar(char: string): string {
   switch (char) {
@@ -165,5 +154,5 @@ export function getToolStatusLabel(
     return null;
   }
 
-  return TOOL_STATUS_LABELS[toolCall.name] ?? "Running...";
+  return null;
 }

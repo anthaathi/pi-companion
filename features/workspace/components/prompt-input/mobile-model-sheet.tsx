@@ -6,18 +6,20 @@ import { Fonts } from '@/constants/theme';
 import { matchesModelSearch } from './model-search';
 import { usePromptTheme } from './use-theme-colors';
 import { ProviderIcon } from './provider-icons';
-import { useAgentConfig } from '@pi-ui/client';
+import type { AgentConfigHandle } from '@pi-ui/client';
 
 interface MobileModelSheetProps {
   visible: boolean;
   sessionId?: string | null;
   onClose: () => void;
+  config: AgentConfigHandle;
 }
 
 function MobileModelSheetComponent({
   visible,
   sessionId,
   onClose,
+  config,
 }: MobileModelSheetProps) {
   const theme = usePromptTheme();
   const searchRef = useRef<TextInput>(null);
@@ -25,7 +27,6 @@ function MobileModelSheetComponent({
   const slideAnim = useRef(new Animated.Value(300)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
 
-  const config = useAgentConfig(sessionId ?? null);
   const models = config.models;
   const currentModel = config.state?.model;
 

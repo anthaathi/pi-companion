@@ -36,10 +36,6 @@ function ToolCallCardComponent({ toolCall }: { toolCall: ToolCallInfo }) {
 
   const label = formatToolLabel(toolCall.name, toolCall.arguments);
   const output = toolCall.result ?? toolCall.partialResult;
-  const isRunning =
-    toolCall.status === "running" ||
-    toolCall.status === "streaming" ||
-    toolCall.status === "pending";
   const statusLabel = getToolStatusLabel(toolCall);
   const mutedColor = isDark ? "#666" : "#999";
 
@@ -66,13 +62,6 @@ function ToolCallCardComponent({ toolCall }: { toolCall: ToolCallInfo }) {
             numberOfLines={1}
           >
             {statusLabel}
-          </Text>
-        ) : isRunning ? (
-          <Text
-            style={[styles.status, { color: mutedColor }]}
-            numberOfLines={1}
-          >
-            Running...
           </Text>
         ) : null}
       </Pressable>

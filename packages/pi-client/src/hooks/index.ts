@@ -4,4 +4,5 @@ export { useAgentSession, type AgentSessionHandle } from "./use-agent-session";
 export { useSessionList, type SessionListHandle } from "./use-session-list";
 export { useAgentConfig, type AgentConfigHandle } from "./use-agent-config";
 export { useAgentEvent } from "./use-agent-event";
+export { useTurnEnd, type TurnEndEvent } from "./use-turn-end";
 export { useObservable } from "./use-observable";

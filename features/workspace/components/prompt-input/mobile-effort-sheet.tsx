@@ -5,24 +5,25 @@ import { Check } from 'lucide-react-native';
 import { Fonts } from '@/constants/theme';
 import { THINKING_LEVELS, ThinkingLevel } from './constants';
 import { usePromptTheme } from './use-theme-colors';
-import { useAgentConfig } from '@pi-ui/client';
+import type { AgentConfigHandle } from '@pi-ui/client';
 
 interface MobileEffortSheetProps {
   visible: boolean;
   sessionId?: string | null;
   onClose: () => void;
+  config: AgentConfigHandle;
 }
 
 function MobileEffortSheetComponent({
   visible,
   sessionId,
   onClose,
+  config,
 }: MobileEffortSheetProps) {
   const theme = usePromptTheme();
   const slideAnim = useRef(new Animated.Value(300)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
 
-  const config = useAgentConfig(sessionId ?? null);
   const currentThinking = config.state?.thinkingLevel ?? 'medium';
 
   useEffect(() => {
