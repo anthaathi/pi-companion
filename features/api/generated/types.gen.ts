@@ -269,6 +269,7 @@ export type GitStatusResponse = {
     behind: number;
     branch: string;
     is_clean: boolean;
+    remote_url?: string | null;
     staged: Array<GitFileEntry>;
     unstaged: Array<GitFileEntry>;
     untracked: Array<string>;
