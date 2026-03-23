@@ -6,7 +6,8 @@ interface Draft {
   attachments: Attachment[];
 }
 
-const EMPTY_DRAFT: Draft = { text: '', attachments: [] };
+const EMPTY_ATTACHMENTS: Attachment[] = [];
+const EMPTY_DRAFT: Draft = { text: '', attachments: EMPTY_ATTACHMENTS };
 
 interface DraftState {
   drafts: Record<string, Draft>;
@@ -24,7 +25,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
 
   getText: (key) => get().drafts[key]?.text ?? '',
 
-  getAttachments: (key) => get().drafts[key]?.attachments ?? [],
+  getAttachments: (key) => get().drafts[key]?.attachments ?? EMPTY_ATTACHMENTS,
 
   setText: (key, text) =>
     set((state) => {
