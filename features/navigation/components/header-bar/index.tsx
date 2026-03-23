@@ -314,9 +314,9 @@ export function HeaderBar({
               accessibilityRole="button"
               accessibilityLabel="Open repository"
             >
-              <RepoIcon host={allLinks[0].host} size={14} color={textMuted} />
+              <ExternalLink size={14} color={textMuted} strokeWidth={1.8} />
               <Text style={[styles.repoBtnLabel, { color: textMuted }]}>
-                Open in {allLinks[0].label} +{allLinks.length - 1}
+                Open in
               </Text>
               <ChevronDown size={12} color={textMuted} strokeWidth={1.8} />
             </Pressable>
