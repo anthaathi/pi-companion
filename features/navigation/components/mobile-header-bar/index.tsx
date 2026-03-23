@@ -1,5 +1,5 @@
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { GitBranch, PanelLeft, SquarePen, ExternalLink } from 'lucide-react-native';
+import { GitBranch, Github, Gitlab, ExternalLink, PanelLeft, SquarePen } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 
 import { Colors, Fonts } from '@/constants/theme';
@@ -117,7 +117,13 @@ export function MobileHeaderBar({ onWorkspacePress, onGitPress, onChatSessionsPr
             accessibilityRole="button"
             accessibilityLabel={`Open in ${firstLink.label}`}
           >
-            <ExternalLink size={16} color={textPrimary} strokeWidth={1.8} />
+            {firstLink.host === 'github' ? (
+              <Github size={16} color={textPrimary} strokeWidth={1.8} />
+            ) : firstLink.host === 'gitlab' ? (
+              <Gitlab size={16} color={textPrimary} strokeWidth={1.8} />
+            ) : (
+              <ExternalLink size={16} color={textPrimary} strokeWidth={1.8} />
+            )}
           </Pressable>
         )}
         {appMode === 'code' && (

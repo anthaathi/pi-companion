@@ -404,6 +404,22 @@ fn status_char_to_string(c: u8) -> String {
     }
 }
 
+/// Strip credentials (username:password@) from HTTPS git remote URLs.
+/// e.g. "https://user:ghp_token@github.com/org/repo.git" -> "https://github.com/org/repo.git"
+fn strip_credentials(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("https://") {
+        if let Some(at_pos) = rest.find('@') {
+            return format!("https://{}", &rest[at_pos + 1..]);
+        }
+    }
+    if let Some(rest) = url.strip_prefix("http://") {
+        if let Some(at_pos) = rest.find('@') {
+            return format!("http://{}", &rest[at_pos + 1..]);
+        }
+    }
+    url.to_string()
+}
+
 fn list_remotes(cwd: &str) -> Vec<GitRemote> {
     let output = match git(cwd, &["remote", "-v"]) {
         Ok(o) => o,
@@ -416,7 +432,7 @@ fn list_remotes(cwd: &str) -> Vec<GitRemote> {
         let parts: Vec<&str> = line.split(|c| c == '\t' || c == ' ').collect();
         if parts.len() >= 2 {
             let name = parts[0].to_string();
-            let url = parts[1].to_string();
+            let url = strip_credentials(parts[1]);
             let key = format!("{}:{}", name, url);
             if seen.insert(key) {
                 remotes.push(GitRemote { name, url });

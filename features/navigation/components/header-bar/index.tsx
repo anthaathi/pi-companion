@@ -3,6 +3,8 @@ import {
   Check,
   ChevronDown,
   ExternalLink,
+  Github,
+  Gitlab,
   PanelLeft,
   Search,
   Settings,
@@ -28,6 +30,12 @@ import { useWorkspaceStore } from "@/features/workspace/store";
 import { useAppMode } from "@/hooks/use-app-mode";
 import { useGitStatus, useNestedRepos } from "@/features/workspace/hooks/use-git-status";
 import { remotesToLinks, type RemoteLink } from "@/features/workspace/utils/git-remote-url";
+
+function RepoIcon({ host, size, color }: { host: string; size: number; color: string }) {
+  if (host === "github") return <Github size={size} color={color} strokeWidth={1.8} />;
+  if (host === "gitlab") return <Gitlab size={size} color={color} strokeWidth={1.8} />;
+  return <ExternalLink size={size} color={color} strokeWidth={1.8} />;
+}
 
 interface HeaderBarProps {
   onToggleSidebar: () => void;
@@ -281,13 +289,17 @@ export function HeaderBar({
           <Pressable
             onPress={() => Linking.openURL(singleLink.browserUrl)}
             style={({ pressed }) => [
-              styles.headerBtn,
+              styles.repoBtn,
+              { backgroundColor: isDark ? "#2A2A2A" : "#F0F0F0" },
               pressed && { opacity: 0.7 },
             ]}
             accessibilityRole="button"
             accessibilityLabel={`Open in ${singleLink.label}`}
           >
-            <ExternalLink size={16} color={textMuted} strokeWidth={1.8} />
+            <RepoIcon host={singleLink.host} size={14} color={textMuted} />
+            <Text style={[styles.repoBtnLabel, { color: textMuted }]}>
+              {singleLink.label}
+            </Text>
           </Pressable>
         )}
         {hasMultipleLinks && (
@@ -295,13 +307,18 @@ export function HeaderBar({
             <Pressable
               onPress={() => setRepoMenuVisible((v) => !v)}
               style={({ pressed }) => [
-                styles.headerBtn,
+                styles.repoBtn,
+                { backgroundColor: isDark ? "#2A2A2A" : "#F0F0F0" },
                 pressed && { opacity: 0.7 },
               ]}
               accessibilityRole="button"
               accessibilityLabel="Open repository"
             >
-              <ExternalLink size={16} color={textMuted} strokeWidth={1.8} />
+              <RepoIcon host={allLinks[0].host} size={14} color={textMuted} />
+              <Text style={[styles.repoBtnLabel, { color: textMuted }]}>
+                {allLinks.length} repos
+              </Text>
+              <ChevronDown size={12} color={textMuted} strokeWidth={1.8} />
             </Pressable>
             {repoMenuVisible && (
               <>
@@ -330,20 +347,25 @@ export function HeaderBar({
                         pressed && { backgroundColor: isDark ? "#333" : "#F0F0F0" },
                       ]}
                     >
-                      <Text
-                        style={[styles.repoMenuLabel, { color: textPrimary }]}
-                        numberOfLines={1}
-                      >
-                        {link.repoPath
-                          ? `${link.repoPath} → ${link.label}`
-                          : `${link.name} → ${link.label}`}
-                      </Text>
-                      <Text
-                        style={[styles.repoMenuUrl, { color: textMuted }]}
-                        numberOfLines={1}
-                      >
-                        {link.browserUrl.replace("https://", "")}
-                      </Text>
+                      <View style={styles.repoMenuItemRow}>
+                        <RepoIcon host={link.host} size={14} color={textMuted} />
+                        <View style={styles.repoMenuItemText}>
+                          <Text
+                            style={[styles.repoMenuLabel, { color: textPrimary }]}
+                            numberOfLines={1}
+                          >
+                            {link.repoPath
+                              ? `${link.repoPath}`
+                              : `${link.name}`}
+                          </Text>
+                          <Text
+                            style={[styles.repoMenuUrl, { color: textMuted }]}
+                            numberOfLines={1}
+                          >
+                            {link.browserUrl.replace("https://", "")}
+                          </Text>
+                        </View>
+                      </View>
                     </Pressable>
                   ))}
                 </View>
@@ -494,6 +516,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
+  repoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    height: 26,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  repoBtnLabel: {
+    fontSize: 12,
+    fontFamily: Fonts.sansMedium,
+    fontWeight: "500" as const,
+  },
   repoMenu: {
     position: "absolute",
     top: 30,
@@ -512,6 +547,14 @@ const styles = StyleSheet.create({
   repoMenuItem: {
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  repoMenuItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  repoMenuItemText: {
+    flex: 1,
   },
   repoMenuLabel: {
     fontSize: 12,
