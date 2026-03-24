@@ -1,5 +1,7 @@
-use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::body::Body;
+use axum::extract::{Multipart, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::Response;
 use axum::Json;
 use std::path::PathBuf;
 
@@ -8,6 +10,8 @@ use crate::models::*;
 use crate::routes::auth::require_auth;
 
 const MAX_READ_BYTES: u64 = 1_048_576;
+/// Max upload size: 50 MB
+const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
@@ -427,4 +431,198 @@ fn delete_path(path: &str, recursive: bool) -> Result<(), String> {
     } else {
         std::fs::remove_file(&expanded).map_err(|e| format!("{e}"))
     }
+}
+
+// ── binary upload (multipart) ──
+
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+pub struct UploadQuery {
+    /// Target directory path (supports ~)
+    pub path: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/fs/upload",
+    params(("path" = String, Query, description = "Target directory path (supports ~)")),
+    request_body(content_type = "multipart/form-data", content = Vec<u8>, description = "One or more files"),
+    responses(
+        (status = 200, description = "Upload results", body = FsUploadResponse),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "filesystem"
+)]
+pub async fn upload(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<UploadQuery>,
+    mut multipart: Multipart,
+) -> (StatusCode, Json<ApiResponse<FsUploadResponse>>) {
+    auth_guard!(&state, &headers);
+
+    let target_dir = expand_tilde(&params.path);
+    if let Err(e) = std::fs::create_dir_all(&target_dir) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::err(format!("Cannot create target dir: {e}"))),
+        );
+    }
+
+    let mut results = Vec::new();
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let file_name = match field.file_name() {
+            Some(name) => name.to_string(),
+            None => {
+                results.push(FsUploadFileResult {
+                    name: "(unknown)".to_string(),
+                    path: String::new(),
+                    size: 0,
+                    success: false,
+                    error: Some("Missing file name".to_string()),
+                });
+                continue;
+            }
+        };
+
+        let dest = target_dir.join(&file_name);
+
+        match field.bytes().await {
+            Ok(bytes) => {
+                if bytes.len() > MAX_UPLOAD_BYTES {
+                    results.push(FsUploadFileResult {
+                        name: file_name,
+                        path: dest.to_string_lossy().to_string(),
+                        size: bytes.len() as u64,
+                        success: false,
+                        error: Some(format!(
+                            "File exceeds max size ({} MB)",
+                            MAX_UPLOAD_BYTES / 1024 / 1024
+                        )),
+                    });
+                    continue;
+                }
+
+                let size = bytes.len() as u64;
+                let dest_clone = dest.clone();
+                match tokio::task::spawn_blocking(move || {
+                    std::fs::write(&dest_clone, &bytes)
+                })
+                .await
+                .unwrap()
+                {
+                    Ok(_) => {
+                        results.push(FsUploadFileResult {
+                            name: file_name,
+                            path: dest.to_string_lossy().to_string(),
+                            size,
+                            success: true,
+                            error: None,
+                        });
+                    }
+                    Err(e) => {
+                        results.push(FsUploadFileResult {
+                            name: file_name,
+                            path: dest.to_string_lossy().to_string(),
+                            size,
+                            success: false,
+                            error: Some(format!("{e}")),
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                results.push(FsUploadFileResult {
+                    name: file_name,
+                    path: dest.to_string_lossy().to_string(),
+                    size: 0,
+                    success: false,
+                    error: Some(format!("Read error: {e}")),
+                });
+            }
+        }
+    }
+
+    let total = results.len() as u32;
+    let succeeded = results.iter().filter(|r| r.success).count() as u32;
+    (
+        StatusCode::OK,
+        Json(ApiResponse::ok(FsUploadResponse {
+            total,
+            succeeded,
+            files: results,
+        })),
+    )
+}
+
+// ── binary download ──
+
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+pub struct DownloadQuery {
+    /// File path (supports ~)
+    pub path: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/fs/download",
+    params(("path" = String, Query, description = "File path (supports ~)")),
+    responses(
+        (status = 200, description = "Raw file bytes", content_type = "application/octet-stream"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "filesystem"
+)]
+pub async fn download(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<DownloadQuery>,
+) -> Result<Response, (StatusCode, Json<ApiResponse<()>>)> {
+    if let Err((code, msg)) = require_auth(&state, &headers).await {
+        return Err((code, Json(ApiResponse::err(msg))));
+    }
+
+    let path = params.path.clone();
+    let expanded = expand_tilde(&path);
+
+    let (bytes, file_name) = tokio::task::spawn_blocking(move || {
+        let meta = std::fs::metadata(&expanded).map_err(|e| format!("{e}"))?;
+        if meta.is_dir() {
+            return Err("Path is a directory".to_string());
+        }
+        let bytes = std::fs::read(&expanded).map_err(|e| format!("{e}"))?;
+        let name = expanded
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "file".to_string());
+        Ok((bytes, name))
+    })
+    .await
+    .unwrap()
+    .map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::err(e)),
+        )
+    })?;
+
+    let content_type = mime_guess::from_path(&file_name)
+        .first_or_octet_stream()
+        .to_string();
+
+    let len = bytes.len();
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", HeaderValue::from_str(&content_type).unwrap_or(HeaderValue::from_static("application/octet-stream")))
+        .header("content-length", len)
+        .header(
+            "content-disposition",
+            HeaderValue::from_str(&format!("attachment; filename=\"{}\"", file_name))
+                .unwrap_or(HeaderValue::from_static("attachment")),
+        )
+        .body(Body::from(bytes))
+        .unwrap())
 }

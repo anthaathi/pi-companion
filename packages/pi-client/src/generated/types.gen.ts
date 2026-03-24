@@ -199,6 +199,20 @@ export type FsReadResponse = {
     truncated: boolean;
 };
 
+export type FsUploadFileResult = {
+    error?: string | null;
+    name: string;
+    path: string;
+    size: number;
+    success: boolean;
+};
+
+export type FsUploadResponse = {
+    files: Array<FsUploadFileResult>;
+    succeeded: number;
+    total: number;
+};
+
 export type FsWriteRequest = {
     content: string;
     path: string;
@@ -1612,6 +1626,36 @@ export type DeleteResponses = {
 
 export type DeleteResponse = DeleteResponses[keyof DeleteResponses];
 
+export type DownloadData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * File path (supports ~)
+         */
+        path: string;
+    };
+    url: '/api/fs/download';
+};
+
+export type DownloadErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorBody;
+};
+
+export type DownloadError = DownloadErrors[keyof DownloadErrors];
+
+export type DownloadResponses = {
+    /**
+     * Raw file bytes
+     */
+    200: Blob | File;
+};
+
+export type DownloadResponse = DownloadResponses[keyof DownloadResponses];
+
 export type ListData = {
     body?: never;
     path?: never;
@@ -1704,6 +1748,39 @@ export type ReadResponses = {
 };
 
 export type ReadResponse = ReadResponses[keyof ReadResponses];
+
+export type UploadData = {
+    /**
+     * One or more files
+     */
+    body: Array<number>;
+    path?: never;
+    query: {
+        /**
+         * Target directory path (supports ~)
+         */
+        path: string;
+    };
+    url: '/api/fs/upload';
+};
+
+export type UploadErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorBody;
+};
+
+export type UploadError = UploadErrors[keyof UploadErrors];
+
+export type UploadResponses = {
+    /**
+     * Upload results
+     */
+    200: FsUploadResponse;
+};
+
+export type UploadResponse = UploadResponses[keyof UploadResponses];
 
 export type WriteData = {
     body: FsWriteRequest;
@@ -2398,41 +2475,6 @@ export type UpdateResponses = {
 };
 
 export type UpdateResponse = UpdateResponses[keyof UpdateResponses];
-
-export type GetOlderMessagesData = {
-    body?: never;
-    path: {
-        /**
-         * Session ID
-         */
-        session_id: string;
-    };
-    query?: {
-        /**
-         * Load messages before this entry ID
-         */
-        before?: string;
-        /**
-         * Max messages to return (default 20)
-         */
-        limit?: number;
-    };
-    url: '/api/sessions/{session_id}/messages';
-};
-
-export type GetOlderMessagesErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-};
-
-export type GetOlderMessagesResponses = {
-    /**
-     * Paginated messages
-     */
-    200: unknown;
-};
 
 export type StreamData = {
     body?: never;

@@ -1,5 +1,5 @@
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { GitBranch, Github, Gitlab, ExternalLink, Globe, PanelLeft, SquarePen } from 'lucide-react-native';
+import { FolderOpen, GitBranch, Github, Gitlab, ExternalLink, Globe, PanelLeft, SquarePen } from 'lucide-react-native';
 import { usePathname, useRouter } from 'expo-router';
 
 import { Colors, Fonts } from '@/constants/theme';
@@ -17,13 +17,14 @@ const EMPTY_TARGETS: never[] = [];
 interface MobileHeaderBarProps {
   onWorkspacePress: () => void;
   onGitPress: () => void;
+  onFilesPress?: () => void;
   onPreviewPress?: () => void;
   onChatSessionsPress?: () => void;
   onTasksPress?: () => void;
   onTaskOutputPress?: () => void;
 }
 
-export function MobileHeaderBar({ onWorkspacePress, onGitPress, onPreviewPress, onChatSessionsPress, onTasksPress, onTaskOutputPress }: MobileHeaderBarProps) {
+export function MobileHeaderBar({ onWorkspacePress, onGitPress, onFilesPress, onPreviewPress, onChatSessionsPress, onTasksPress, onTaskOutputPress }: MobileHeaderBarProps) {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
   const isDark = colorScheme === 'dark';
@@ -161,6 +162,18 @@ export function MobileHeaderBar({ onWorkspacePress, onGitPress, onPreviewPress, 
             <Globe size={16} color={textPrimary} strokeWidth={1.8} />
           </Pressable>
         )}
+        <Pressable
+          onPress={onFilesPress}
+          style={({ pressed }) => [
+            styles.iconButton,
+            { backgroundColor: buttonBg },
+            pressed && { opacity: 0.7 },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Files"
+        >
+          <FolderOpen size={16} color={textPrimary} strokeWidth={1.8} />
+        </Pressable>
         {appMode === 'code' && (
           <Pressable
             onPress={onGitPress}

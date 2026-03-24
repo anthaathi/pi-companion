@@ -199,6 +199,22 @@ pub struct FsMkdirRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct FsUploadFileResult {
+    pub name: String,
+    pub path: String,
+    pub size: u64,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct FsUploadResponse {
+    pub total: u32,
+    pub succeeded: u32,
+    pub files: Vec<FsUploadFileResult>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GitStatusResponse {
     pub branch: String,
     pub is_clean: bool,

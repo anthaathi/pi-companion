@@ -23,6 +23,7 @@ import { HeaderBar } from "../../components/header-bar";
 import { MobileHeaderBar } from "../../components/mobile-header-bar";
 import { WorkspaceSheet } from "../../components/workspace-sheet";
 import { MobileChangesSheet } from "../../components/mobile-changes-sheet";
+import { MobileFilesSheet } from "../../components/mobile-files-sheet";
 import { MobilePreviewSheet } from "../../components/mobile-preview-sheet";
 import { SessionSidebar } from "@/features/workspace/components/session-sidebar";
 import { useAuthStore } from "@/features/auth/store";
@@ -59,6 +60,7 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
   const showSessions = hasServer && hasWorkspaces;
   const [sheetVisible, setSheetVisible] = useState(false);
   const [changesSheetVisible, setChangesSheetVisible] = useState(false);
+  const [filesSheetVisible, setFilesSheetVisible] = useState(false);
   const [previewSheetVisible, setPreviewSheetVisible] = useState(false);
   const [chatSheetVisible, setChatSheetVisible] = useState(false);
   const [tasksSheetVisible, setTasksSheetVisible] = useState(false);
@@ -389,7 +391,13 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
         {hasServer && (
           <MobileHeaderBar
             onWorkspacePress={() => setSheetVisible(true)}
+            onFilesPress={() => {
+              setChangesSheetVisible(false);
+              setPreviewSheetVisible(false);
+              setFilesSheetVisible(true);
+            }}
             onGitPress={() => {
+              setFilesSheetVisible(false);
               setPreviewSheetVisible(false);
               setChangesSheetVisible(true);
             }}
@@ -444,6 +452,12 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
         <ChatSheet
           visible={chatSheetVisible}
           onClose={() => setChatSheetVisible(false)}
+        />
+      )}
+      {hasServer && (
+        <MobileFilesSheet
+          visible={filesSheetVisible}
+          onClose={() => setFilesSheetVisible(false)}
         />
       )}
     </GestureHandlerRootView>

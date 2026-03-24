@@ -161,6 +161,7 @@ export function ChangesPanel() {
               onViewFile={setViewingFile}
               expandedDirs={expandedDirs}
               onToggleDir={handleToggleDir}
+              showActions
             />
           ) : (
             <Text style={[styles.emptyText, { color: textMuted }]}>

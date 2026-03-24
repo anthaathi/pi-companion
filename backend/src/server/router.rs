@@ -94,6 +94,8 @@ fn fs_routes() -> Router<AppState> {
         .route("/fs/write", post(routes::fs::write))
         .route("/fs/mkdir", post(routes::fs::mkdir))
         .route("/fs/delete", delete(routes::fs::delete))
+        .route("/fs/upload", post(routes::fs::upload))
+        .route("/fs/download", get(routes::fs::download))
 }
 
 fn git_routes() -> Router<AppState> {

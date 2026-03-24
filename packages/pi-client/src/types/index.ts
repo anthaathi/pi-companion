@@ -13,6 +13,8 @@ export type {
   FsEntry,
   FsListResponse,
   FsReadResponse,
+  FsUploadFileResult,
+  FsUploadResponse,
   GitBranch,
   GitDiffResponse,
   GitFileDiffResponse,

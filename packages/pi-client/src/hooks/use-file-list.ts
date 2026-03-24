@@ -12,7 +12,7 @@ export interface FileListState {
 
 const INITIAL_LIST: FileListState = { entries: [], isLoading: true, error: null };
 
-export function useFileList(dirPath: string | null): FileListState {
+export function useFileList(dirPath: string | null, refreshKey = 0): FileListState {
   const { api } = usePiClient();
   const state$ = useRef(new BehaviorSubject<FileListState>(INITIAL_LIST));
 
@@ -43,7 +43,7 @@ export function useFileList(dirPath: string | null): FileListState {
     return () => {
       cancelled = true;
     };
-  }, [dirPath, api]);
+  }, [dirPath, refreshKey, api]);
 
   return useObservable(state$.current, INITIAL_LIST);
 }

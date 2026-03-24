@@ -119,6 +119,7 @@ fn filtered_preview_query(query: Option<&str>) -> String {
         .split('&')
         .filter(|entry| !entry.is_empty())
         .filter(|entry| !entry.starts_with("access_token="))
+        .filter(|entry| !entry.starts_with("__pi_"))
         .collect::<Vec<_>>()
         .join("&")
 }
