@@ -52,6 +52,8 @@ export class SessionStreamConnection {
   private _autoReconnect = true;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _destroyed = false;
+  private _lastConnectedAt = 0;
+  private _wasEverConnected = false;
 
   constructor(config: SessionStreamConfig) {
     this._config = config;
@@ -79,6 +81,12 @@ export class SessionStreamConnection {
 
   get currentSessionId(): string | null {
     return this._sessionId;
+  }
+
+  /** How many ms since we were last connected. Returns Infinity if never connected. */
+  get msSinceLastConnected(): number {
+    if (!this._wasEverConnected) return Infinity;
+    return Date.now() - this._lastConnectedAt;
   }
 
   connect(
@@ -148,6 +156,8 @@ export class SessionStreamConnection {
         return;
       }
       this._retryCount = 0;
+      this._lastConnectedAt = Date.now();
+      this._wasEverConnected = true;
       this._setState({ status: "loading_history", sessionId });
     });
 
@@ -260,6 +270,10 @@ export class SessionStreamConnection {
   }
 
   private _resolveLastMessageId(sessionId: string): string | undefined {
+    // After a long disconnect (>60s, e.g. sleep), do a full reload
+    if (this._wasEverConnected && this.msSinceLastConnected > 60_000) {
+      return undefined; // no cursor = full history
+    }
     if (this._retryCount > 0 && !this._before) {
       return this._config.getResumeCursor?.(sessionId) ?? this._lastMessageId;
     }

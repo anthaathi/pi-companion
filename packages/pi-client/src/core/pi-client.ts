@@ -85,9 +85,9 @@ export class PiClient {
     if (!this._viewedSessionId) return;
     const sessionStream = this._sessionStreams.get(this._viewedSessionId);
     if (sessionStream) {
-      if (sessionStream.stateSnapshot.status !== "connected") {
-        sessionStream.reconnect();
-      }
+      // Always do full reload on explicit reconnect (e.g. app foregrounded)
+      if (__DEV__) console.log("[pi:session]", "reconnect (explicit, full reload)", this._viewedSessionId);
+      sessionStream.connect(this._viewedSessionId);
       return;
     }
     this._ensureSessionStream(this._viewedSessionId);
@@ -558,14 +558,23 @@ export class PiClient {
 
     const stream = this._sessionStreams.get(sessionId);
     if (stream && stream.stateSnapshot.status === "connected" && !isStale) {
+      // If connected but was away for a long time (sleep), force full reload
+      if (stream.msSinceLastConnected > 60_000) {
+        if (__DEV__) console.log("[pi:session]", "reconnect (long disconnect, full reload)", sessionId);
+        stream.connect(sessionId);
+        return;
+      }
       if (__DEV__) console.log("[pi:session]", "already connected", sessionId);
       return;
     }
 
     const sessionStream = this._getOrCreateSessionStream(sessionId);
 
-    if (isStale) {
-      if (__DEV__) console.log("[pi:session]", "reconnect (stale)", sessionId);
+    // After a long disconnect (sleep), always do a full history reload
+    const wasLongDisconnect = sessionStream.msSinceLastConnected > 60_000;
+
+    if (isStale || wasLongDisconnect) {
+      if (__DEV__) console.log("[pi:session]", `reconnect (${isStale ? "stale" : "long disconnect"})`, sessionId);
       sessionStream.connect(sessionId);
     } else {
       const hasMessages = this._getOrCreateSessionSubject(sessionId).getValue().messages.length > 0;
