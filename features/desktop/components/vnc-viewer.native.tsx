@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Platform,
   StatusBar,
   StyleSheet,
@@ -112,7 +113,10 @@ export function VncViewer({ serverUrl, accessToken, vncPort, vncPassword, onTogg
   const key = `vnc_${vncPort}`;
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       <StatusBar hidden={immersive} />
       <WebView
         ref={webViewRef}
@@ -148,7 +152,7 @@ export function VncViewer({ serverUrl, accessToken, vncPort, vncPassword, onTogg
         // Keep a buffer of underscores so backspace works
         defaultValue="______"
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
