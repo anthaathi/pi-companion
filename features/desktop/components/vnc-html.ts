@@ -4,6 +4,7 @@ export function buildVncHtml(wsUrl: string, vncPassword?: string | null): string
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #111; position: fixed; inset: 0; }
@@ -57,17 +58,36 @@ export function buildVncHtml(wsUrl: string, vncPassword?: string | null): string
   #menu-panel button:active { background: rgba(255,255,255,0.12); }
   #menu-panel button.active { color: #4fc3f7; }
 
+  /* Like noVNC: keep textarea in the DOM flow, inside the container,
+     but visually hidden. Never move it off-screen — that causes
+     mobile browsers/WebViews to consider it unfocusable and dismiss
+     the keyboard on any touch. */
   #kbd-input {
-    position: fixed; left: -9999px; top: -9999px;
-    width: 1px; height: 1px; opacity: 0.01;
+    position: fixed;
+    bottom: 0; left: 0;
+    width: 1px; height: 1px;
+    opacity: 0.01;
     font-size: 16px;
+    border: none; outline: none;
+    color: transparent;
+    background: transparent;
+    resize: none;
+    z-index: -1;
+    /* Prevent iOS zoom */
+    transform: scale(0);
+    transform-origin: bottom left;
+  }
+  #kbd-input.active {
+    /* When keyboard is open, make it "real" enough that the OS keeps it focused */
+    transform: scale(1);
+    z-index: 300;
   }
 </style>
 </head>
 <body>
 <div id="status">Connecting…</div>
 <div id="screen"></div>
-<textarea id="kbd-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+<textarea id="kbd-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" tabindex="-1"></textarea>
 
 <div id="menu-panel">
   <button id="btn-kbd">⌨ Keyboard</button>
@@ -123,7 +143,7 @@ function connect() {
     retries = 0;
     status.textContent = "Connected";
     status.classList.add("connected");
-    rfb.focus();
+    if (!kbdOpen) rfb.focus();
   });
 
   rfb.addEventListener("disconnect", (e) => {
@@ -145,9 +165,12 @@ function connect() {
 }
 connect();
 
-target.addEventListener("click", () => {
+// Use touchstart to catch taps BEFORE the browser blurs the textarea.
+// On desktop (no touch), fall back to mousedown.
+function onScreenTap(e) {
   if (kbdOpen) {
-    // Keep keyboard open — re-focus the hidden input
+    // Prevent the browser from processing the touch which would blur kbd-input
+    e.preventDefault();
     kbdInput.focus({ preventScroll: true });
   } else if (rfb) {
     rfb.focus();
@@ -155,20 +178,35 @@ target.addEventListener("click", () => {
   if (window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(JSON.stringify({ type: "tap" }));
   }
+}
+target.addEventListener("touchstart", onScreenTap, { passive: false });
+target.addEventListener("mousedown", (e) => {
+  // Only handle on non-touch devices
+  if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;
+  onScreenTap(e);
+});
+
+// Guard: if the textarea loses focus while the keyboard should be open,
+// immediately re-focus it (handles edge cases where the OS blurs it).
+kbdInput.addEventListener("blur", () => {
+  if (kbdOpen) {
+    setTimeout(() => {
+      if (kbdOpen && document.activeElement !== kbdInput) {
+        kbdInput.focus({ preventScroll: true });
+      }
+    }, 50);
+  }
 });
 
 // --- Mobile keyboard ---
 function toggleKeyboard() {
   kbdOpen = !kbdOpen;
   document.getElementById("btn-kbd").classList.toggle("active", kbdOpen);
+  kbdInput.classList.toggle("active", kbdOpen);
   if (kbdOpen) {
     kbdInput.value = "";
-    kbdInput.style.left = "0";
-    kbdInput.style.top = "0";
     kbdInput.focus({ preventScroll: true });
   } else {
-    kbdInput.style.left = "-9999px";
-    kbdInput.style.top = "-9999px";
     kbdInput.blur();
     if (rfb) rfb.focus();
   }
