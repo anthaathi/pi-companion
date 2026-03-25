@@ -57,6 +57,7 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
   const appMode = useAppMode();
   const isCodeMode = appMode === "code";
   const isChatMode = appMode === "chat";
+  const isDesktopMode = appMode === "desktop";
   const showSessions = hasServer && hasWorkspaces;
   const [sheetVisible, setSheetVisible] = useState(false);
   const [changesSheetVisible, setChangesSheetVisible] = useState(false);
@@ -242,7 +243,7 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
         >
           <AppModeToggle />
         </View>
-        {hasServer ? (
+        {hasServer && !isDesktopMode ? (
           <HeaderBar
             onToggleSidebar={handleToggleSidebar}
             onToggleChatSidebar={handleToggleChatSidebar}
@@ -388,7 +389,7 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
         >
           <AppModeToggle />
         </View>
-        {hasServer && (
+        {hasServer && !isDesktopMode && (
           <MobileHeaderBar
             onWorkspacePress={() => setSheetVisible(true)}
             onFilesPress={() => {

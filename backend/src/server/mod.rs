@@ -18,6 +18,7 @@ use crate::config::AppConfig;
 use crate::db::Database;
 use crate::routes;
 use crate::services::agent::AgentManager;
+use crate::services::desktop::DesktopManager;
 use crate::services::provider::PiAgentProvider;
 use crate::services::connection::ConnectionInfo;
 use crate::services::pairing::PairingManager;
@@ -94,6 +95,8 @@ pub async fn serve(cli: Cli, force_qr: bool) -> anyhow::Result<()> {
     ));
     port_scanner.start_periodic_scan();
 
+    let desktop = DesktopManager::new();
+
     let state = AppState {
         config: Arc::new(config.clone()),
         db: Arc::new(db),
@@ -101,6 +104,7 @@ pub async fn serve(cli: Cli, force_qr: bool) -> anyhow::Result<()> {
         agent,
         task_manager,
         port_scanner,
+        desktop,
         http_client: reqwest::Client::new(),
         instance_id,
     };

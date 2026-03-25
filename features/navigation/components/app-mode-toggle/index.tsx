@@ -17,9 +17,10 @@ import { useChatStore } from '@/features/chat/store';
 const MODES: { key: AppMode; label: string }[] = [
   { key: 'chat', label: 'Chat' },
   { key: 'code', label: 'Code' },
+  { key: 'desktop', label: 'Desktop' },
 ];
 
-const TAB_WIDTH = 56;
+const TAB_WIDTH = 64;
 const TAB_GAP = 1;
 const PILL_TRAVEL = TAB_WIDTH + TAB_GAP;
 
@@ -60,6 +61,14 @@ export function AppModeToggle() {
   const handleSelect = useCallback(
     (mode: AppMode) => {
       if (mode === visualMode) return;
+
+      if (mode === 'desktop') {
+        setPendingMode(mode);
+        startTransition(() => {
+          router.replace('/desktop');
+        });
+        return;
+      }
 
       const workspaceState = useWorkspaceStore.getState();
       const workspaceId = workspaceState.selectedWorkspaceId;

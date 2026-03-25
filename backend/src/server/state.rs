@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::AppConfig;
 use crate::db::Database;
 use crate::services::agent::AgentManager;
+use crate::services::desktop::DesktopManager;
 use crate::services::pairing::PairingManager;
 use crate::services::port_scanner::PortScanner;
 use crate::services::task::TaskManager;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub agent: AgentManager,
     pub task_manager: TaskManager,
     pub port_scanner: Arc<PortScanner>,
+    pub desktop: DesktopManager,
     pub http_client: reqwest::Client,
     pub instance_id: Arc<String>,
 }

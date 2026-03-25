@@ -15,6 +15,7 @@ pub fn api_routes() -> Router<AppState> {
         .merge(chat_routes())
         .merge(custom_model_routes())
         .merge(task_routes())
+        .merge(desktop_routes())
 }
 
 fn auth_routes() -> Router<AppState> {
@@ -239,6 +240,15 @@ fn custom_model_routes() -> Router<AppState> {
             "/custom-models",
             axum::routing::put(routes::custom_models::save_custom_models),
         )
+}
+
+fn desktop_routes() -> Router<AppState> {
+    Router::new()
+        .route("/desktop/backends", get(routes::desktop::get_backends))
+        .route("/desktop/status", get(routes::desktop::get_status))
+        .route("/desktop/start", post(routes::desktop::start_desktop))
+        .route("/desktop/stop", post(routes::desktop::stop_desktop))
+        .route("/desktop/ws", get(routes::desktop::vnc_websocket))
 }
 
 fn task_routes() -> Router<AppState> {

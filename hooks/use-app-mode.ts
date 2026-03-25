@@ -1,8 +1,10 @@
 import { usePathname } from 'expo-router';
 
-export type AppMode = 'chat' | 'code';
+export type AppMode = 'chat' | 'code' | 'desktop';
 
 export function useAppMode(): AppMode {
   const pathname = usePathname();
-  return pathname.startsWith('/chat') ? 'chat' : 'code';
+  if (pathname.startsWith('/chat')) return 'chat';
+  if (pathname.startsWith('/desktop')) return 'desktop';
+  return 'code';
 }

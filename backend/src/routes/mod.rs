@@ -2,6 +2,7 @@ pub mod agent;
 pub mod auth;
 pub mod chat;
 pub mod custom_models;
+pub mod desktop;
 pub mod fs;
 pub mod git;
 pub mod health;

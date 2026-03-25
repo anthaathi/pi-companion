@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod connection;
+pub mod desktop;
 pub mod git;
 pub mod package;
 pub mod pairing;
