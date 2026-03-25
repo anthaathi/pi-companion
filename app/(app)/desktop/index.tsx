@@ -102,7 +102,7 @@ export default function DesktopScreen() {
     // Wide screen: simple inline toolbar
     if (isWideScreen) {
       return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.container, { backgroundColor: immersive ? '#000' : colors.background }]}>
           {!immersive && (
             <View style={[styles.toolbar, { borderBottomColor: colors.border }]}>
               <Text style={[styles.toolbarText, { color: colors.textSecondary }]} numberOfLines={1}>

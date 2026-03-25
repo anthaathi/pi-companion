@@ -234,8 +234,8 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
 
     return (
       <SafeAreaView
-        style={[styles.wideContainer, { backgroundColor: colors.background }]}
-        edges={["top"]}
+        style={[styles.wideContainer, { backgroundColor: isDesktopMode && desktopImmersive ? '#000' : colors.background }]}
+        edges={isDesktopMode && desktopImmersive ? [] : ["top"]}
       >
         {!(isDesktopMode && desktopImmersive) && (
           <View
@@ -382,8 +382,8 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
       style={[styles.narrowContainer, { backgroundColor: colors.background }]}
     >
       <SafeAreaView
-        style={[styles.narrowSafeArea, { backgroundColor: colors.background }]}
-        edges={["top"]}
+        style={[styles.narrowSafeArea, { backgroundColor: isDesktopMode && desktopImmersive ? '#000' : colors.background }]}
+        edges={isDesktopMode && desktopImmersive ? [] : ["top"]}
       >
         {!(isDesktopMode && desktopImmersive) && (
           <View
