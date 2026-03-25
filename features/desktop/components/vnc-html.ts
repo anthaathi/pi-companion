@@ -64,6 +64,7 @@ export function buildVncHtml(wsUrl: string, vncPassword?: string | null): string
 <div id="screen"></div>
 
 <div id="menu-panel">
+  <button id="btn-drag" class="active">✋ Drag Viewport</button>
   <button id="btn-kbd">⌨ Keyboard</button>
   <button id="btn-fs">⛶ Fullscreen</button>
   <button id="btn-clip">📋 Paste</button>
@@ -88,6 +89,7 @@ let retries = 0;
 const MAX_RETRIES = 3;
 let menuOpen = false;
 let kbdOpen = false;
+let dragMode = true;
 
 // --- Menu ---
 function toggleMenu() {
@@ -111,6 +113,7 @@ function connect() {
   rfb.scaleViewport = true;
   rfb.resizeSession = false;
   rfb.clipViewport = true;
+  rfb.dragViewport = dragMode;
 
   rfb.addEventListener("connect", () => {
     retries = 0;
@@ -194,6 +197,12 @@ target.addEventListener("click", () => {
 });
 
 // --- Keyboard toggle: managed by React Native, just track state for UI ---
+document.getElementById("btn-drag").addEventListener("click", () => {
+  dragMode = !dragMode;
+  document.getElementById("btn-drag").classList.toggle("active", dragMode);
+  if (rfb) rfb.dragViewport = dragMode;
+});
+
 document.getElementById("btn-kbd").addEventListener("click", () => {
   kbdOpen = !kbdOpen;
   document.getElementById("btn-kbd").classList.toggle("active", kbdOpen);
