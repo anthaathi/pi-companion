@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { buildVncHtml } from './vnc-html';
@@ -13,6 +13,8 @@ interface VncViewerProps {
 
 export function VncViewer({ serverUrl, accessToken, vncPort, vncPassword, onToggleFullscreen }: VncViewerProps) {
   const [immersive, setImmersive] = useState(false);
+  const immersiveRef = useRef(immersive);
+  immersiveRef.current = immersive;
 
   const html = useMemo(() => {
     const url = new URL(serverUrl);
@@ -25,12 +27,12 @@ export function VncViewer({ serverUrl, accessToken, vncPort, vncPassword, onTogg
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'toggleFullscreen') {
-        const next = !immersive;
+        const next = !immersiveRef.current;
         setImmersive(next);
         onToggleFullscreen?.(next);
       }
     } catch {}
-  }, [immersive, onToggleFullscreen]);
+  }, [onToggleFullscreen]);
 
   const key = `vnc_${vncPort}`;
 

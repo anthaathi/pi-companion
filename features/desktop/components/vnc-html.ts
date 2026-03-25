@@ -196,17 +196,17 @@ kbdInput.addEventListener("keydown", (e) => {
 document.getElementById("btn-kbd").addEventListener("click", () => { toggleKeyboard(); });
 
 document.getElementById("btn-fs").addEventListener("click", () => {
-  // Try browser fullscreen first
+  // In React Native WebView, always use the native immersive toggle
+  if (window.ReactNativeWebView) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: "toggleFullscreen" }));
+    return;
+  }
+  // Browser fallback (web platform)
   const el = document.documentElement;
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   } else if (el.requestFullscreen) {
     el.requestFullscreen().catch(() => {});
-  } else {
-    // Native: send message to React Native WebView
-    if (window.ReactNativeWebView) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: "toggleFullscreen" }));
-    }
   }
 });
 
