@@ -147,6 +147,9 @@ connect();
 
 target.addEventListener("click", () => {
   if (rfb) rfb.focus();
+  if (window.ReactNativeWebView) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: "tap" }));
+  }
 });
 
 // --- Mobile keyboard ---

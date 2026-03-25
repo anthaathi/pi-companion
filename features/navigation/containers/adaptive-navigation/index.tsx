@@ -233,25 +233,25 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
     return (
       <SafeAreaView
         style={[styles.wideContainer, { backgroundColor: colors.background }]}
-        edges={["top"]}
+        edges={isDesktopMode ? [] : ["top"]}
       >
-        <View
-          style={[
-            styles.modeToggleRow,
-            { backgroundColor: isDark ? "#1a1a1a" : "#F5F4F1" },
-          ]}
-        >
-          <AppModeToggle />
-        </View>
+        {!isDesktopMode && (
+          <View
+            style={[
+              styles.modeToggleRow,
+              { backgroundColor: isDark ? "#1a1a1a" : "#F5F4F1" },
+            ]}
+          >
+            <AppModeToggle />
+          </View>
+        )}
         {hasServer && !isDesktopMode ? (
           <HeaderBar
             onToggleSidebar={handleToggleSidebar}
             onToggleChatSidebar={handleToggleChatSidebar}
             sidebarVisible={isPersistent}
           />
-        ) : (
-          <View style={{ height: 0 }} />
-        )}
+        ) : null}
         <View style={styles.bodyRow}>
           {hasServer && railMounted && (
             <Animated.View
@@ -379,16 +379,18 @@ export function AdaptiveNavigation({ children }: AdaptiveNavigationProps) {
     >
       <SafeAreaView
         style={[styles.narrowSafeArea, { backgroundColor: colors.background }]}
-        edges={["top"]}
+        edges={isDesktopMode ? [] : ["top"]}
       >
-        <View
-          style={[
-            styles.modeToggleRow,
-            { backgroundColor: isDark ? "#1a1a1a" : "#F5F4F1" },
-          ]}
-        >
-          <AppModeToggle />
-        </View>
+        {!isDesktopMode && (
+          <View
+            style={[
+              styles.modeToggleRow,
+              { backgroundColor: isDark ? "#1a1a1a" : "#F5F4F1" },
+            ]}
+          >
+            <AppModeToggle />
+          </View>
+        )}
         {hasServer && !isDesktopMode && (
           <MobileHeaderBar
             onWorkspacePress={() => setSheetVisible(true)}
