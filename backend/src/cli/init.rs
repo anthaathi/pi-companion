@@ -39,6 +39,7 @@ pub fn run_init() -> anyhow::Result<()> {
             port,
             host,
             server_id: Some(uuid::Uuid::new_v4().to_string()),
+            remote: false,
         },
         auth: config::AuthConfig {
             username,

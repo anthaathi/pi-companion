@@ -110,7 +110,9 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
       const endData = event as unknown as Record<string, unknown>;
       if (Array.isArray(endData["messages"])) {
         const authoritative = convertRawMessages(endData["messages"] as Record<string, string>[]);
-        if (authoritative.length > 0 && authoritative.length >= messages.length) {
+        if (authoritative.length > 0) {
+          // Always accept authoritative messages from agent_end.
+          // These are the complete ground-truth message list from the backend.
           messages = authoritative;
         }
       }
@@ -349,6 +351,27 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
         isStreaming = data.isStreaming;
         if (!isStreaming) {
           messages = updateLastStreaming(messages, (msg) => ({ ...msg, isStreaming: false }));
+        }
+      }
+      break;
+    }
+
+    case "agent_state": {
+      // agent_state is emitted on session touch/create with full session state
+      // from the backend. It carries isStreaming, mode, model info, etc.
+      const data = event as unknown as {
+        isStreaming?: boolean;
+        mode?: string;
+      };
+      if (typeof data.isStreaming === "boolean") {
+        isStreaming = data.isStreaming;
+        if (!isStreaming) {
+          messages = updateLastStreaming(messages, (msg) => ({ ...msg, isStreaming: false }));
+        }
+      }
+      if (typeof data.mode === "string") {
+        if (data.mode === "plan" || data.mode === "chat") {
+          mode = data.mode;
         }
       }
       break;

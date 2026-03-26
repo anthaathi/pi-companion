@@ -51,6 +51,8 @@ interface AuthState {
   tokens: Record<string, AuthSessionBundle>;
   activeServerId: string | null;
   loaded: boolean;
+  /** Whether the active server has desktop/remote mode enabled (Linux only). */
+  remote: boolean;
 
   load: () => Promise<void>;
   loginToServer: (server: Server) => Promise<{ success: boolean; error?: string }>;
@@ -303,6 +305,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     tokens: {},
     activeServerId: null,
     loaded: false,
+    remote: false,
 
     load: async () => {
       const { tokens, activeServerId, migrated } = await readStore();
@@ -438,7 +441,17 @@ export const useAuthStore = create<AuthState>((set, get) => {
         return false;
       }
 
-      set({ activeServerId: server.id });
+      // Fetch server capabilities (remote flag) from /version
+      let remote = false;
+      try {
+        const versionRes = await sdk.version();
+        const versionData = versionRes.data as any;
+        remote = !!versionData?.remote;
+      } catch {
+        // Non-fatal — default to false
+      }
+
+      set({ activeServerId: server.id, remote });
       await writeActiveServerId(server.id);
       return true;
     },

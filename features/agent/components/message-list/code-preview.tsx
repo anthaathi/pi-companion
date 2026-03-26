@@ -1,6 +1,9 @@
 import { useMemo } from "react";
-import { ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { Fonts } from "@/constants/theme";
+
+const DEFAULT_DARK_TEXT = "#CCCCCC";
+const DEFAULT_LIGHT_TEXT = "#1A1A1A";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -243,7 +246,7 @@ function tokenizeLine(line: string, isDark: boolean): Token[] {
   return tokens;
 }
 
-export function TokenizedText({ line, isDark, style }: { line: string; isDark: boolean; style?: any }) {
+export function TokenizedText({ line, isDark, style }: { line: string; isDark: boolean; style?: StyleProp<TextStyle> }) {
   const tokens = useMemo(() => tokenizeLine(line, isDark), [line, isDark]);
   // Fast path: single token = no nesting needed
   if (tokens.length === 1) {
@@ -258,15 +261,73 @@ export function TokenizedText({ line, isDark, style }: { line: string; isDark: b
   );
 }
 
+export function PlainCodeText({ line, color, style }: { line: string; color: string; style?: StyleProp<TextStyle> }) {
+  return (
+    <Text style={[style, { color }]} selectable>
+      {line || " "}
+    </Text>
+  );
+}
+
 /**
- * Simple diff: just show oldText as removed block and newText as added block.
- * Much cheaper than LCS for the edit tool's search/replace pattern.
+ * Diff for edit/search-replace previews.
+ *
+ * Unlike the old implementation, this keeps unchanged prefix/suffix lines as
+ * context so only the actually changed lines are shown as removed/added.
  */
 export function simpleDiff(oldText: string, newText: string): DiffOp[] {
+  if (!oldText && !newText) return [];
+  if (oldText === newText) {
+    return oldText ? [{ type: "equal", lines: oldText.split("\n") }] : [];
+  }
+
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+
+  let start = 0;
+  while (
+    start < oldLines.length &&
+    start < newLines.length &&
+    oldLines[start] === newLines[start]
+  ) {
+    start += 1;
+  }
+
+  let oldEnd = oldLines.length - 1;
+  let newEnd = newLines.length - 1;
+  while (
+    oldEnd >= start &&
+    newEnd >= start &&
+    oldLines[oldEnd] === newLines[newEnd]
+  ) {
+    oldEnd -= 1;
+    newEnd -= 1;
+  }
+
   const ops: DiffOp[] = [];
-  if (oldText) ops.push({ type: "delete", lines: oldText.split("\n") });
-  if (newText) ops.push({ type: "insert", lines: newText.split("\n") });
-  return ops;
+
+  if (start > 0) {
+    ops.push({ type: "equal", lines: oldLines.slice(0, start) });
+  }
+
+  const oldMiddle = oldLines.slice(start, oldEnd + 1);
+  const newMiddle = newLines.slice(start, newEnd + 1);
+
+  if (oldMiddle.length > 0 || newMiddle.length > 0) {
+    if (oldMiddle.length === 0) {
+      ops.push({ type: "insert", lines: newMiddle });
+    } else if (newMiddle.length === 0) {
+      ops.push({ type: "delete", lines: oldMiddle });
+    } else {
+      ops.push(...lcsLineDiff(oldMiddle.join("\n"), newMiddle.join("\n")));
+    }
+  }
+
+  if (oldEnd < oldLines.length - 1) {
+    ops.push({ type: "equal", lines: oldLines.slice(oldEnd + 1) });
+  }
+
+  return ops.filter((op) => op.lines.length > 0);
 }
 
 /** Max lines to render before showing "Show all" */
@@ -363,6 +424,9 @@ export function SplitDiffView({
   lineNoBg,
   lineNoColor,
   dividerColor,
+  contextTextColor,
+  addTextColor,
+  removeTextColor,
 }: {
   rows: SideBySideRow[];
   containerWidth: number;
@@ -373,8 +437,14 @@ export function SplitDiffView({
   lineNoBg: string;
   lineNoColor: string;
   dividerColor: string;
+  contextTextColor?: string;
+  addTextColor?: string;
+  removeTextColor?: string;
 }) {
   const halfW = Math.max(200, Math.floor((containerWidth - 1) / 2));
+  const baseTextColor = contextTextColor ?? (isDark ? DEFAULT_DARK_TEXT : DEFAULT_LIGHT_TEXT);
+  const addedColor = addTextColor ?? baseTextColor;
+  const removedColor = removeTextColor ?? baseTextColor;
   return (
     <View style={[editStyles.table, { width: halfW * 2 + 1 }]}>
       {rows.map((row, i) => (
@@ -391,7 +461,11 @@ export function SplitDiffView({
               </Text>
             </View>
             {row.leftText != null ? (
-              <TokenizedText line={row.leftText} isDark={isDark} style={editStyles.lineText} />
+              <PlainCodeText
+                line={row.leftText}
+                color={row.leftType === "removed" ? removedColor : baseTextColor}
+                style={editStyles.lineText}
+              />
             ) : (
               <Text style={editStyles.lineText}>{" "}</Text>
             )}
@@ -409,7 +483,11 @@ export function SplitDiffView({
               </Text>
             </View>
             {row.rightText != null ? (
-              <TokenizedText line={row.rightText} isDark={isDark} style={editStyles.lineText} />
+              <PlainCodeText
+                line={row.rightText}
+                color={row.rightType === "added" ? addedColor : baseTextColor}
+                style={editStyles.lineText}
+              />
             ) : (
               <Text style={editStyles.lineText}>{" "}</Text>
             )}

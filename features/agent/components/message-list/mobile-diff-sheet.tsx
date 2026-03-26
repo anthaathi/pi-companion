@@ -21,6 +21,7 @@ import { useDiffPanel, type DiffTab } from "../diff-panel/context";
 import { parseToolArguments, isToolCallActive } from "./tool-call-utils";
 import {
   TokenizedText,
+  PlainCodeText,
   SplitDiffView,
   CodePreview,
   buildCodeRows,
@@ -378,7 +379,11 @@ function EditContent({
                       <Text style={[s.lineNo, { color: lineNoColor }]}>{row.leftLineNo ?? ""}</Text>
                     </View>
                     {row.leftText != null ? (
-                      <TokenizedText line={row.leftText} isDark={isDark} style={s.splitLineText} />
+                      <PlainCodeText
+                        line={row.leftText}
+                        color={row.leftType === "removed" ? removeColor : textColor}
+                        style={s.splitLineText}
+                      />
                     ) : (
                       <Text style={s.splitLineText}>{" "}</Text>
                     )}
@@ -398,7 +403,11 @@ function EditContent({
                       <Text style={[s.lineNo, { color: lineNoColor }]}>{row.rightLineNo ?? ""}</Text>
                     </View>
                     {row.rightText != null ? (
-                      <TokenizedText line={row.rightText} isDark={isDark} style={s.splitLineText} />
+                      <PlainCodeText
+                        line={row.rightText}
+                        color={row.rightType === "added" ? addColor : textColor}
+                        style={s.splitLineText}
+                      />
                     ) : (
                       <Text style={s.splitLineText}>{" "}</Text>
                     )}
@@ -423,7 +432,11 @@ function EditContent({
                   <Text style={[s.lineNo, { color: lineNoColor }]}>{row.newLineNo ?? ""}</Text>
                 </View>
                 <Text style={[s.prefix, { color: prefixColor }]}>{prefix}</Text>
-                <TokenizedText line={row.text} isDark={isDark} style={s.lineText} />
+                <PlainCodeText
+                  line={row.text}
+                  color={row.type === "added" ? addColor : row.type === "removed" ? removeColor : textColor}
+                  style={s.lineText}
+                />
               </View>
             );
           })}

@@ -25,6 +25,7 @@ import type { ChatMessage, ToolCallInfo } from "../../types";
 import { parseToolArguments, isToolCallActive } from "../message-list/tool-call-utils";
 import {
   TokenizedText,
+  PlainCodeText,
   SplitDiffView,
   CodePreview,
   buildInline,
@@ -501,6 +502,9 @@ function DiffBody({
                 lineNoBg={lineNoBg}
                 lineNoColor={lineNoColor}
                 dividerColor={dividerColor}
+                contextTextColor={textColor}
+                addTextColor={addColor}
+                removeTextColor={removeColor}
               />
             </ScrollView>
           ) : (
@@ -518,7 +522,11 @@ function DiffBody({
                       <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.newLineNo ?? ""}</Text>
                     </View>
                     <Text style={[editStyles.prefix, { color: prefixColor }]}>{prefix}</Text>
-                    <TokenizedText line={row.text} isDark={isDark} style={editStyles.lineText} />
+                    <PlainCodeText
+                      line={row.text}
+                      color={row.type === "added" ? addColor : row.type === "removed" ? removeColor : textColor}
+                      style={editStyles.lineText}
+                    />
                   </View>
                 );
               })}

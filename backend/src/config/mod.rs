@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+fn default_remote() -> bool {
+    false
+}
+
 fn default_access_token_ttl_minutes() -> u64 {
     15
 }
@@ -46,6 +50,8 @@ pub struct ServerConfig {
     pub port: u16,
     pub host: String,
     pub server_id: Option<String>,
+    #[serde(default = "default_remote")]
+    pub remote: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -73,6 +79,7 @@ impl Default for AppConfig {
                 port: 5454,
                 host: "0.0.0.0".to_string(),
                 server_id: None,
+                remote: false,
             },
             auth: AuthConfig {
                 username: "admin".to_string(),
@@ -165,6 +172,17 @@ impl AppConfig {
         }
 
         Ok(config)
+    }
+
+    /// Returns `true` only when `server.remote` is set in config AND the
+    /// binary was compiled for Linux.  On all other platforms this is always
+    /// `false`.
+    pub fn remote(&self) -> bool {
+        if cfg!(target_os = "linux") {
+            self.server.remote
+        } else {
+            false
+        }
     }
 
     pub fn server_id(&self) -> &str {

@@ -18,6 +18,7 @@ import { useAppSettingsStore, type DiffViewMode } from "@/features/settings/stor
 import type { DiffOp } from "./code-preview";
 import {
   TokenizedText,
+  PlainCodeText,
   buildInline,
   buildSideBySide,
   type CodeRow,
@@ -257,7 +258,11 @@ export function DiffBottomSheet({
                           </Text>
                         </View>
                         {row.leftText != null ? (
-                          <TokenizedText line={row.leftText} isDark={isDark} style={s.splitLineText} />
+                          <PlainCodeText
+                            line={row.leftText}
+                            color={row.leftType === "removed" ? removeColor : textColor}
+                            style={s.splitLineText}
+                          />
                         ) : (
                           <Text style={s.splitLineText}>{" "}</Text>
                         )}
@@ -279,7 +284,11 @@ export function DiffBottomSheet({
                           </Text>
                         </View>
                         {row.rightText != null ? (
-                          <TokenizedText line={row.rightText} isDark={isDark} style={s.splitLineText} />
+                          <PlainCodeText
+                            line={row.rightText}
+                            color={row.rightType === "added" ? addColor : textColor}
+                            style={s.splitLineText}
+                          />
                         ) : (
                           <Text style={s.splitLineText}>{" "}</Text>
                         )}
@@ -324,7 +333,11 @@ export function DiffBottomSheet({
                         </Text>
                       </View>
                       <Text style={[s.prefix, { color: prefixColor }]}>{prefix}</Text>
-                      <TokenizedText line={row.text} isDark={isDark} style={s.lineText} />
+                      <PlainCodeText
+                        line={row.text}
+                        color={row.type === "added" ? addColor : row.type === "removed" ? removeColor : textColor}
+                        style={s.lineText}
+                      />
                     </View>
                   );
                 })}

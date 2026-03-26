@@ -88,6 +88,8 @@ pub struct VersionResponse {
     pub name: String,
     pub version: String,
     pub server_id: String,
+    /// Whether the server has desktop/remote mode enabled (Linux only).
+    pub remote: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

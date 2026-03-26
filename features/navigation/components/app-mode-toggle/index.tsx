@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Pressable,
@@ -13,8 +13,9 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAppMode, type AppMode } from '@/hooks/use-app-mode';
 import { useWorkspaceStore } from '@/features/workspace/store';
 import { useChatStore } from '@/features/chat/store';
+import { useAuthStore } from '@/features/auth/store';
 
-const MODES: { key: AppMode; label: string }[] = [
+const ALL_MODES: { key: AppMode; label: string }[] = [
   { key: 'chat', label: 'Chat' },
   { key: 'code', label: 'Code' },
   { key: 'desktop', label: 'Desktop' },
@@ -30,7 +31,13 @@ export function AppModeToggle() {
   const colors = Colors[colorScheme];
   const router = useRouter();
   const appMode = useAppMode();
+  const remote = useAuthStore((s) => s.remote);
   const [pendingMode, setPendingMode] = useState<AppMode | null>(null);
+
+  const MODES = useMemo(
+    () => (remote ? ALL_MODES : ALL_MODES.filter((m) => m.key !== 'desktop')),
+    [remote],
+  );
 
   const visualMode = pendingMode ?? appMode;
   const activeIndex = MODES.findIndex((m) => m.key === visualMode);

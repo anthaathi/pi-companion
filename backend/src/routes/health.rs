@@ -42,6 +42,7 @@ pub async fn version(
             name: APP_NAME.to_string(),
             version: APP_VERSION.to_string(),
             server_id: state.config.server_id().to_string(),
+            remote: state.config.remote(),
         }),
     )
 }

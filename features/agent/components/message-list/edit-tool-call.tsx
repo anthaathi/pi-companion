@@ -11,7 +11,7 @@ import { useIsMessageVisible, useMobileDiffSheet } from "./visibility-context";
 import { animateLayout, basename, countLines, sharedStyles as styles } from "./tool-call-shared";
 import {
   SplitDiffView,
-  TokenizedText,
+  PlainCodeText,
   buildInline,
   buildSideBySide,
   editStyles,
@@ -154,7 +154,7 @@ export function EditToolCall({ tc }: { tc: ToolCallInfo }) {
             <ScrollView style={editStyles.scrollV} nestedScrollEnabled>
               {viewMode === "split" ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <SplitDiffView rows={sideBySideRows} containerWidth={containerWidth} isDark={isDark} removeBg={removeBg} addBg={addBg} emptyBg={emptyBg} lineNoBg={lineNoBg} lineNoColor={lineNoColor} dividerColor={dividerColor} />
+                  <SplitDiffView rows={sideBySideRows} containerWidth={containerWidth} isDark={isDark} removeBg={removeBg} addBg={addBg} emptyBg={emptyBg} lineNoBg={lineNoBg} lineNoColor={lineNoColor} dividerColor={dividerColor} contextTextColor={textColor} addTextColor={addColor} removeTextColor={removeColor} />
                 </ScrollView>
               ) : (
                 <View>
@@ -171,7 +171,11 @@ export function EditToolCall({ tc }: { tc: ToolCallInfo }) {
                           <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.newLineNo ?? ""}</Text>
                         </View>
                         <Text style={[editStyles.prefix, { color: prefixColor }]}>{prefix}</Text>
-                        <TokenizedText line={row.text} isDark={isDark} style={editStyles.lineText} />
+                        <PlainCodeText
+                          line={row.text}
+                          color={row.type === "added" ? addColor : row.type === "removed" ? removeColor : textColor}
+                          style={editStyles.lineText}
+                        />
                       </View>
                     );
                   })}

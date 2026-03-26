@@ -51,17 +51,21 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+function stripTrailingSlashes(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
 export const useServersStore = create<ServersState>((set, get) => ({
   servers: [],
   loaded: false,
 
   load: async () => {
-    const servers = await readFromStore();
+    const servers = (await readFromStore()).map((s) => ({ ...s, address: stripTrailingSlashes(s.address) }));
     set({ servers, loaded: true });
   },
 
   addServer: async (server) => {
-    const newServer: Server = { ...server, id: server.id ?? generateId() };
+    const newServer: Server = { ...server, id: server.id ?? generateId(), address: stripTrailingSlashes(server.address) };
     const existingIndex = get().servers.findIndex((entry) => entry.id === newServer.id);
     const servers =
       existingIndex >= 0
@@ -74,8 +78,9 @@ export const useServersStore = create<ServersState>((set, get) => ({
   },
 
   updateServer: async (id, updates) => {
+    const sanitized = updates.address != null ? { ...updates, address: stripTrailingSlashes(updates.address) } : updates;
     const servers = get().servers.map((s) =>
-      s.id === id ? { ...s, ...updates } : s,
+      s.id === id ? { ...s, ...sanitized } : s,
     );
     set({ servers });
     await writeToStore(servers);

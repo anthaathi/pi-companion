@@ -51,10 +51,12 @@ export function useAgentSession(
 
   useEffect(() => {
     if (!sessionId || !options?.sessionFile) return;
+
     client.openSession(sessionId, {
       workspaceId: options.workspaceId,
       sessionFile: options.sessionFile,
     });
+
     const sub = client.serverRestart$.subscribe(() => {
       client.openSession(sessionId, {
         workspaceId: options.workspaceId,
