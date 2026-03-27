@@ -3,6 +3,8 @@ import {
     ActivityIndicator,
     Animated,
     BackHandler,
+    KeyboardAvoidingView,
+    Platform,
     Pressable,
     StatusBar,
     StyleSheet,
@@ -418,7 +420,11 @@ export function VncViewer({
 
     return (
         <GestureHandlerRootView style={styles.root}>
-            <View style={styles.root}>
+            <KeyboardAvoidingView
+                style={styles.root}
+                behavior={Platform.OS === 'ios' ? 'position' : undefined}
+                contentContainerStyle={styles.root}
+            >
                 {showChrome && (
                     <View style={[styles.chromeBar, { backgroundColor: colors.surfaceRaised, borderBottomColor: colors.border }]}>
                         <Text style={[styles.chromeStatus, { color: colors.textSecondary }]} numberOfLines={1}>
@@ -545,7 +551,7 @@ export function VncViewer({
                     onBlur={handleInputBlur}
                     defaultValue="______"
                 />
-            </View>
+            </KeyboardAvoidingView>
         </GestureHandlerRootView>
     );
 }
