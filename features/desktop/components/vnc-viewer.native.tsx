@@ -28,6 +28,8 @@ import {
     Gesture,
     GestureHandlerRootView,
 } from 'react-native-gesture-handler';
+import { useSharedValue } from 'react-native-reanimated';
+import { runOnJS } from 'react-native-reanimated';
 import { vnc } from '@pi-ui/client';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -73,12 +75,16 @@ export function VncViewer({
     const fbWidthRef = useRef(0);
     const fbHeightRef = useRef(0);
 
-    const cursorXRef = useRef(0);
-    const cursorYRef = useRef(0);
+    const cursorX = useSharedValue(0);
+    const cursorY = useSharedValue(0);
     const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
-    const buttonMaskRef = useRef(0);
-    const prevTranslationRef = useRef({ x: 0, y: 0 });
-    const prevScrollYRef = useRef(0);
+    const buttonMask = useSharedValue(0);
+    const prevTranslationX = useSharedValue(0);
+    const prevTranslationY = useSharedValue(0);
+    const prevScrollY = useSharedValue(0);
+    const scaleShared = useSharedValue(1);
+    const fbWShared = useSharedValue(0);
+    const fbHShared = useSharedValue(0);
 
     const wsUrl = useMemo(() => {
         const url = new URL(serverUrl);
@@ -167,10 +173,12 @@ export function VncViewer({
         framebufferRef.current = fb;
         fbWidthRef.current = event.width;
         fbHeightRef.current = event.height;
-        cursorXRef.current = Math.floor(event.width / 2);
-        cursorYRef.current = Math.floor(event.height / 2);
-        setCursorPos({ x: cursorXRef.current, y: cursorYRef.current });
-    }, []);
+        fbWShared.value = event.width;
+        fbHShared.value = event.height;
+        cursorX.value = Math.floor(event.width / 2);
+        cursorY.value = Math.floor(event.height / 2);
+        setCursorPos({ x: Math.floor(event.width / 2), y: Math.floor(event.height / 2) });
+    }, [cursorX, cursorY, fbWShared, fbHShared]);
 
     const session = useVncSession({
         wsUrl,
@@ -180,19 +188,16 @@ export function VncViewer({
         onDisplayInit: handleDisplayInit,
     });
 
-    const clampCursor = useCallback(() => {
-        cursorXRef.current = Math.max(0, Math.min(fbWidthRef.current - 1, cursorXRef.current));
-        cursorYRef.current = Math.max(0, Math.min(fbHeightRef.current - 1, cursorYRef.current));
-    }, []);
-
     const scale = useMemo(() => {
         if (session.framebufferWidth === 0 || session.framebufferHeight === 0) return 1;
         if (canvasSize.width === 0 || canvasSize.height === 0) return 1;
-        return vnc.computeContainedRemoteDisplayScale(
+        const s = vnc.computeContainedRemoteDisplayScale(
             canvasSize.width, canvasSize.height,
             session.framebufferWidth, session.framebufferHeight,
         );
-    }, [canvasSize, session.framebufferWidth, session.framebufferHeight]);
+        scaleShared.value = s;
+        return s;
+    }, [canvasSize, session.framebufferWidth, session.framebufferHeight, scaleShared]);
 
     const imageLayout = useMemo(() => {
         const w = session.framebufferWidth * scale;
@@ -207,31 +212,54 @@ export function VncViewer({
         y: imageLayout.y + cursorPos.y * scale,
     }), [cursorPos, scale, imageLayout]);
 
+    const jsSendPointer = useCallback((mask: number, x: number, y: number) => {
+        session.sendPointerEvent(mask, x, y);
+    }, [session]);
+
+    const jsUpdateCursor = useCallback((x: number, y: number) => {
+        setCursorPos({ x, y });
+    }, []);
+
+    const jsSendPointerDelayed = useCallback((mask: number, x: number, y: number, delay: number) => {
+        setTimeout(() => session.sendPointerEvent(mask, x, y), delay);
+    }, [session]);
+
+    const jsSendWheel = useCallback((deltaY: number, x: number, y: number) => {
+        session.sendWheelEvent(deltaY, x, y, 0);
+    }, [session]);
+
     const panGesture = useMemo(() =>
         Gesture.Pan()
             .minDistance(0)
             .onStart(() => {
-                prevTranslationRef.current = { x: 0, y: 0 };
+                'worklet';
+                prevTranslationX.value = 0;
+                prevTranslationY.value = 0;
             })
             .onUpdate((e) => {
-                const deltaX = e.translationX - prevTranslationRef.current.x;
-                const deltaY = e.translationY - prevTranslationRef.current.y;
-                prevTranslationRef.current = { x: e.translationX, y: e.translationY };
-                cursorXRef.current += deltaX / scale * TRACKPAD_SENSITIVITY;
-                cursorYRef.current += deltaY / scale * TRACKPAD_SENSITIVITY;
-                clampCursor();
-                const x = Math.floor(cursorXRef.current);
-                const y = Math.floor(cursorYRef.current);
-                setCursorPos({ x, y });
-                session.sendPointerEvent(buttonMaskRef.current, x, y);
+                'worklet';
+                const deltaX = e.translationX - prevTranslationX.value;
+                const deltaY = e.translationY - prevTranslationY.value;
+                prevTranslationX.value = e.translationX;
+                prevTranslationY.value = e.translationY;
+                const s = scaleShared.value;
+                cursorX.value += deltaX / s * TRACKPAD_SENSITIVITY;
+                cursorY.value += deltaY / s * TRACKPAD_SENSITIVITY;
+                cursorX.value = Math.max(0, Math.min(fbWShared.value - 1, cursorX.value));
+                cursorY.value = Math.max(0, Math.min(fbHShared.value - 1, cursorY.value));
+                const x = Math.floor(cursorX.value);
+                const y = Math.floor(cursorY.value);
+                runOnJS(jsUpdateCursor)(x, y);
+                runOnJS(jsSendPointer)(buttonMask.value, x, y);
             })
             .onEnd(() => {
-                if (buttonMaskRef.current !== 0) {
-                    buttonMaskRef.current = 0;
-                    session.sendPointerEvent(0, Math.floor(cursorXRef.current), Math.floor(cursorYRef.current));
+                'worklet';
+                if (buttonMask.value !== 0) {
+                    buttonMask.value = 0;
+                    runOnJS(jsSendPointer)(0, Math.floor(cursorX.value), Math.floor(cursorY.value));
                 }
             }),
-        [scale, clampCursor, session],
+        [prevTranslationX, prevTranslationY, scaleShared, cursorX, cursorY, fbWShared, fbHShared, buttonMask, jsUpdateCursor, jsSendPointer],
     );
 
     const tapGesture = useMemo(() =>
@@ -239,24 +267,26 @@ export function VncViewer({
             .maxDuration(250)
             .maxDistance(TAP_MOVE_THRESHOLD)
             .onEnd(() => {
-                const x = Math.floor(cursorXRef.current);
-                const y = Math.floor(cursorYRef.current);
-                session.sendPointerEvent(1, x, y);
-                setTimeout(() => session.sendPointerEvent(0, x, y), 50);
+                'worklet';
+                const x = Math.floor(cursorX.value);
+                const y = Math.floor(cursorY.value);
+                runOnJS(jsSendPointer)(1, x, y);
+                runOnJS(jsSendPointerDelayed)(0, x, y, 50);
             }),
-        [session],
+        [cursorX, cursorY, jsSendPointer, jsSendPointerDelayed],
     );
 
     const longPressGesture = useMemo(() =>
         Gesture.LongPress()
             .minDuration(LONG_PRESS_MS)
             .onStart(() => {
-                const x = Math.floor(cursorXRef.current);
-                const y = Math.floor(cursorYRef.current);
-                session.sendPointerEvent(4, x, y);
-                setTimeout(() => session.sendPointerEvent(0, x, y), 100);
+                'worklet';
+                const x = Math.floor(cursorX.value);
+                const y = Math.floor(cursorY.value);
+                runOnJS(jsSendPointer)(4, x, y);
+                runOnJS(jsSendPointerDelayed)(0, x, y, 100);
             }),
-        [session],
+        [cursorX, cursorY, jsSendPointer, jsSendPointerDelayed],
     );
 
     const twoFingerPanGesture = useMemo(() =>
@@ -264,18 +294,20 @@ export function VncViewer({
             .minPointers(2)
             .maxPointers(2)
             .onStart(() => {
-                prevScrollYRef.current = 0;
+                'worklet';
+                prevScrollY.value = 0;
             })
             .onUpdate((e) => {
-                const deltaY = e.translationY - prevScrollYRef.current;
-                prevScrollYRef.current = e.translationY;
-                const x = Math.floor(cursorXRef.current);
-                const y = Math.floor(cursorYRef.current);
+                'worklet';
+                const deltaY = e.translationY - prevScrollY.value;
+                prevScrollY.value = e.translationY;
                 if (Math.abs(deltaY) > 2) {
-                    session.sendWheelEvent(deltaY, x, y, 0);
+                    const x = Math.floor(cursorX.value);
+                    const y = Math.floor(cursorY.value);
+                    runOnJS(jsSendWheel)(deltaY, x, y);
                 }
             }),
-        [session],
+        [prevScrollY, cursorX, cursorY, jsSendWheel],
     );
 
     const composedGesture = useMemo(() =>
