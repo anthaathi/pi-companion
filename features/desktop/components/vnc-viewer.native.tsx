@@ -3,8 +3,6 @@ import {
     ActivityIndicator,
     Animated,
     BackHandler,
-    KeyboardAvoidingView,
-    Platform,
     Pressable,
     StatusBar,
     StyleSheet,
@@ -329,6 +327,7 @@ export function VncViewer({
     }, [kbdVisible]);
 
     const handleToggleFullscreen = useCallback(() => {
+        StatusBar.setHidden(!immersive, 'fade');
         const next = !immersive;
         setImmersive(next);
         onToggleFullscreen?.(next);
@@ -402,6 +401,7 @@ export function VncViewer({
                 return true;
             }
             if (immersive) {
+                StatusBar.setHidden(false, 'fade');
                 setImmersive(false);
                 onToggleFullscreen?.(false);
                 return true;
@@ -418,12 +418,7 @@ export function VncViewer({
 
     return (
         <GestureHandlerRootView style={styles.root}>
-            <KeyboardAvoidingView
-                style={styles.root}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            >
-                <StatusBar hidden={immersive} />
-
+            <View style={styles.root}>
                 {showChrome && (
                     <View style={[styles.chromeBar, { backgroundColor: colors.surfaceRaised, borderBottomColor: colors.border }]}>
                         <Text style={[styles.chromeStatus, { color: colors.textSecondary }]} numberOfLines={1}>
@@ -550,7 +545,7 @@ export function VncViewer({
                     onBlur={handleInputBlur}
                     defaultValue="______"
                 />
-            </KeyboardAvoidingView>
+            </View>
         </GestureHandlerRootView>
     );
 }
