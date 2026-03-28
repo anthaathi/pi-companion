@@ -50,3 +50,34 @@ unsloth_compiled_cache/
 /ios
 /android
 .eas-token
+
+# agent/tool config directories
+.agents/
+.claude/
+.codebuddy/
+.commandcode/
+.continue/
+.crush/
+.factory/
+.goose/
+.junie/
+.kilocode/
+.kiro/
+.kode/
+.mcpjam/
+.mux/
+.neovate/
+.openhands/
+.pi/
+.pochi/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.vibe/
+.windsurf/
+.zencoder/
+
+# pi local skills
+skills/
+skills-lock.json
