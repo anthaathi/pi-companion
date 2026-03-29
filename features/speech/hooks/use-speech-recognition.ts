@@ -38,6 +38,12 @@ export function useSpeechRecognition(
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
 
+  const onInterimRef = useRef(onInterim);
+  const onFinalRef = useRef(onFinal);
+  useEffect(() => { onInterimRef.current = onInterim; }, [onInterim]);
+  useEffect(() => { onFinalRef.current = onFinal; }, [onFinal]);
+  const sessionRef = useRef(0);
+
   // Native audio recorder (hook must be called unconditionally)
   const nativeRecorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
   const recorderState = useAudioRecorderState(nativeRecorder, 100);
@@ -90,6 +96,7 @@ export function useSpeechRecognition(
 
   // --- Built-in: Web Speech API — realtime with interim results ---
   const startBuiltinWeb = useCallback(() => {
+    const session = ++sessionRef.current;
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -102,6 +109,7 @@ export function useSpeechRecognition(
     recognition.lang = 'en-US';
 
     recognition.onresult = (event: any) => {
+      if (sessionRef.current !== session) return;
       let interim = '';
       let final = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -112,32 +120,36 @@ export function useSpeechRecognition(
           interim += transcript;
         }
       }
-      if (final) onFinal(final);
-      if (interim) onInterim(interim);
+      if (final) onFinalRef.current(final);
+      if (interim) onInterimRef.current(interim);
     };
     recognition.onerror = (event: any) => {
+      if (sessionRef.current !== session) return;
       if (event.error !== 'aborted') {
         setError(event.error || 'Recognition failed');
       }
       setIsListening(false);
     };
-    recognition.onend = () => setIsListening(false);
+    recognition.onend = () => {
+      if (sessionRef.current !== session) return;
+      setIsListening(false);
+    };
 
     webRecognitionRef.current = recognition;
     recognition.start();
     setIsListening(true);
     setError(null);
 
-    // Start metering for waveform
     navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
       streamRef.current = stream;
       startMetering(stream);
     }).catch(() => {});
-  }, [onInterim, onFinal, startMetering]);
+  }, [startMetering]);
 
   // --- API mode on web: record full audio, transcribe on stop ---
   const startApiWeb = useCallback(async () => {
     try {
+      ++sessionRef.current;
       setError(null);
       chunksRef.current = [];
 
@@ -214,7 +226,7 @@ export function useSpeechRecognition(
 
           const data = await response.json();
           if (data.text && data.text.trim()) {
-            onFinal(data.text.trim());
+            onFinalRef.current(data.text.trim());
           }
         } catch (e: any) {
           setError(e.message || 'Transcription failed');
@@ -223,11 +235,12 @@ export function useSpeechRecognition(
       };
       mediaRecorder.stop();
     });
-  }, [apiBaseUrl, apiKey, model, onFinal]);
+  }, [apiBaseUrl, apiKey, model]);
 
   // --- API mode on native: use expo-audio useAudioRecorder ---
   const startApiNative = useCallback(async () => {
     try {
+      ++sessionRef.current;
       setError(null);
 
       if (!apiKey) {
@@ -287,15 +300,16 @@ export function useSpeechRecognition(
       }
 
       const data = await response.json();
-      if (data.text) onFinal(data.text.trim());
+      if (data.text) onFinalRef.current(data.text.trim());
     } catch (e: any) {
       setError(e.message || 'Transcription failed');
     }
-  }, [nativeRecorder, apiBaseUrl, apiKey, model, onFinal]);
+  }, [nativeRecorder, apiBaseUrl, apiKey, model]);
 
   // --- WebSocket streaming transcription (OpenAI Realtime Transcription API) ---
   const startWsRealtime = useCallback(async () => {
     try {
+      const session = ++sessionRef.current;
       setError(null);
 
       if (!apiKey) {
@@ -332,14 +346,29 @@ export function useSpeechRecognition(
         }));
       };
 
+      let interimAccumulator = '';
       ws.onmessage = (event) => {
         try {
+          if (sessionRef.current !== session) return;
           const msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
+          console.log('[WS-STT]', msg.type, msg.delta ?? msg.transcript ?? '');
           if (msg.type === 'conversation.item.input_audio_transcription.delta') {
-            if (msg.delta) onInterim(msg.delta);
+            if (msg.delta) {
+              interimAccumulator += msg.delta;
+              console.log('[WS-STT] interim so far:', JSON.stringify(interimAccumulator));
+              onInterimRef.current(interimAccumulator);
+            }
           } else if (msg.type === 'conversation.item.input_audio_transcription.completed') {
-            if (msg.transcript?.trim()) onFinal(msg.transcript.trim());
+            console.log('[WS-STT] completed:', JSON.stringify(msg.transcript), '| interim was:', JSON.stringify(interimAccumulator));
+            interimAccumulator = '';
+            if (msg.transcript?.trim()) onFinalRef.current(msg.transcript.trim());
+          } else if (msg.type === 'input_audio_buffer.speech_started') {
+            interimAccumulator = '';
+            console.log('[WS-STT] speech_started');
+          } else if (msg.type === 'input_audio_buffer.speech_stopped') {
+            console.log('[WS-STT] speech_stopped');
           } else if (msg.type === 'error') {
+            console.error('[WS-STT] error:', msg.error);
             setError(msg.error?.message || 'Realtime API error');
           }
         } catch {
@@ -392,24 +421,22 @@ export function useSpeechRecognition(
     } catch (e: any) {
       setError(e.message || 'Failed to start realtime transcription');
     }
-  }, [apiKey, apiBaseUrl, wsModel, onInterim, onFinal, startMetering]);
+  }, [apiKey, apiBaseUrl, wsModel, startMetering]);
 
   const stopWsRealtime = useCallback(async () => {
-    // Stop audio capture
     audioContextRef.current?.close();
     audioContextRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
 
-    // Commit remaining buffer, wait for final transcript, then close
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-      setTimeout(() => {
+    if (ws) {
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
-        wsRef.current = null;
-      }, 2000);
-    } else {
+      }
       wsRef.current = null;
     }
 
@@ -444,7 +471,7 @@ export function useSpeechRecognition(
     }
     if (Platform.OS === 'web') {
       if (mode === 'builtin' && webRecognitionRef.current) {
-        webRecognitionRef.current.stop();
+        webRecognitionRef.current.abort();
         webRecognitionRef.current = null;
         setIsListening(false);
       } else if (mode === 'api' && useRealtimeWs) {

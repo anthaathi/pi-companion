@@ -28,7 +28,7 @@ export type RemoteDisplayRect =
         height: number;
         srcX: number;
         srcY: number;
-      };
+      }
     | {
         kind: 'resize';
         x: number;

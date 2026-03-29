@@ -233,11 +233,14 @@ export function PromptInput({
 
   const textBeforeSpeechRef = useRef("");
   const handleSpeechInterim = useCallback((interim: string) => {
-    setText(textBeforeSpeechRef.current + (textBeforeSpeechRef.current ? " " : "") + interim);
+    const result = textBeforeSpeechRef.current + (textBeforeSpeechRef.current ? " " : "") + interim;
+    console.log('[UI-STT] handleSpeechInterim:', JSON.stringify({ base: textBeforeSpeechRef.current, interim, result }));
+    setText(result);
   }, [setText]);
   const handleSpeechFinal = useCallback((final: string) => {
     const base = textBeforeSpeechRef.current;
     const newText = base + (base ? " " : "") + final;
+    console.log('[UI-STT] handleSpeechFinal:', JSON.stringify({ base, final, newText }));
     setText(newText);
     textBeforeSpeechRef.current = newText;
   }, [setText]);
@@ -245,6 +248,9 @@ export function PromptInput({
     isListening, start: startListening, stop: stopListening,
     error: speechError, clearError: clearSpeechError, audioLevel,
   } = useSpeechRecognition(handleSpeechInterim, handleSpeechFinal);
+
+  const isListeningRef = useRef(false);
+  useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
 
   const handleMicPress = useCallback(() => {
     if (inputDisabled) return;
@@ -324,6 +330,9 @@ export function PromptInput({
   // --- Slash commands ---
   const handleTextChange = useCallback((value: string) => {
     setText(value);
+    if (isListeningRef.current) {
+      textBeforeSpeechRef.current = value;
+    }
     const slashMatch = value.match(/(?:^|\s)\/([\w:-]*)$/);
     if (slashMatch) {
       const query = slashMatch[1].toLowerCase();

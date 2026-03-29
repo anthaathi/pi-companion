@@ -57,7 +57,7 @@ export function VncViewer({
 
         for (const rect of event.rects) {
             if (rect.kind === 'rgba') {
-                const view = new Uint8ClampedArray(rect.rgba.buffer, rect.rgba.byteOffset, rect.rgba.byteLength);
+                const view = new Uint8ClampedArray(rect.rgba.buffer as ArrayBuffer, rect.rgba.byteOffset, rect.rgba.byteLength);
                 const img = new ImageData(view, rect.width, rect.height);
                 ctx.putImageData(img, rect.x, rect.y);
             } else if (rect.kind === 'copy') {
