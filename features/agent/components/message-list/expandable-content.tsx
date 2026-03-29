@@ -20,7 +20,7 @@ export function ExpandableContent({
   const handleLayout = useCallback(
     (e: { nativeEvent: { layout: { height: number } } }) => {
       const h = e.nativeEvent.layout.height;
-      if (h !== lastHeight.current) {
+      if (h > 0 && h !== lastHeight.current) {
         lastHeight.current = h;
         onMeasure(h);
       }
@@ -31,10 +31,21 @@ export function ExpandableContent({
   if (!shouldRender) return null;
 
   return (
-    <Animated.View style={containerStyle}>
-      <View onLayout={handleLayout}>
-        {children}
+    <View>
+      <View style={styles.measure} pointerEvents="none">
+        <View onLayout={handleLayout}>{children}</View>
       </View>
-    </Animated.View>
+      <Animated.View style={containerStyle}>{children}</Animated.View>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  measure: {
+    position: "absolute",
+    opacity: 0,
+    zIndex: -1,
+    alignSelf: "stretch",
+    width: "100%",
+  },
+});

@@ -1,5 +1,5 @@
-import { type ReactNode, useCallback, useRef } from "react";
-import { View } from "react-native";
+import { type ReactNode, useCallback, useRef, useState } from "react";
+import { StyleSheet, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -17,8 +17,9 @@ interface AnimatedEntryProps {
 
 export function AnimatedEntry({ children, enabled = true }: AnimatedEntryProps) {
   const measuredHeight = useSharedValue(0);
-  const progress = useSharedValue(enabled ? 0 : 1);
-  const hasStarted = useRef(!enabled);
+  const progress = useSharedValue(0);
+  const hasMeasured = useRef(false);
+  const [ready, setReady] = useState(false);
 
   const containerStyle = useAnimatedStyle(() => {
     const p = progress.value;
@@ -33,26 +34,52 @@ export function AnimatedEntry({ children, enabled = true }: AnimatedEntryProps) 
     };
   });
 
-  const handleLayout = useCallback(
+  const handleMeasure = useCallback(
     (e: { nativeEvent: { layout: { height: number } } }) => {
       const h = e.nativeEvent.layout.height;
-      if (h <= 0) return;
-      if (!hasStarted.current) {
+      if (h > 0 && !hasMeasured.current) {
+        hasMeasured.current = true;
         measuredHeight.value = h;
-        hasStarted.current = true;
+        setReady(true);
         progress.value = withTiming(1, { duration: DURATION, easing: EASING });
-      } else if (h > measuredHeight.value) {
-        measuredHeight.value = h;
       }
     },
     [measuredHeight, progress],
   );
 
+  const handleGrowth = useCallback(
+    (e: { nativeEvent: { layout: { height: number } } }) => {
+      const h = e.nativeEvent.layout.height;
+      if (h > measuredHeight.value) {
+        measuredHeight.value = h;
+      }
+    },
+    [measuredHeight],
+  );
+
   if (!enabled) return <>{children}</>;
+
+  if (!ready) {
+    return (
+      <View style={styles.measure} pointerEvents="none">
+        <View onLayout={handleMeasure}>{children}</View>
+      </View>
+    );
+  }
 
   return (
     <Animated.View style={containerStyle}>
-      <View onLayout={handleLayout}>{children}</View>
+      <View onLayout={handleGrowth}>{children}</View>
     </Animated.View>
   );
 }
+
+const styles = StyleSheet.create({
+  measure: {
+    position: "absolute",
+    opacity: 0,
+    zIndex: -1,
+    alignSelf: "stretch",
+    width: "100%",
+  },
+});

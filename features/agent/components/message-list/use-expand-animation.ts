@@ -37,7 +37,7 @@ export function useExpandAnimation(options?: UseExpandAnimationOptions) {
         measuredHeight.value = height;
         pendingExpand.current = false;
         startExpandAnimation();
-      } else if (progress.value >= 0.99 || height > measuredHeight.value) {
+      } else {
         measuredHeight.value = height;
       }
     },
