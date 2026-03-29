@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { ChevronDown, ChevronRight, Columns2, Rows2 } from "lucide-react-native";
+import { Columns2, Rows2 } from "lucide-react-native";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useResponsiveLayout } from "@/features/navigation/hooks/use-responsive-layout";
@@ -8,7 +8,7 @@ import { useAppSettingsStore, type DiffViewMode } from "@/features/settings/stor
 import type { ToolCallInfo } from "../../types";
 import { getToolStatusLabel, isToolCallActive, parseToolArguments } from "./tool-call-utils";
 import { useIsMessageVisible, useMobileDiffSheet } from "./visibility-context";
-import { animateLayout, basename, countLines, sharedStyles as styles } from "./tool-call-shared";
+import { basename, countLines, sharedStyles as styles } from "./tool-call-shared";
 import {
   SplitDiffView,
   PlainCodeText,
@@ -18,6 +18,9 @@ import {
   simpleDiff,
 } from "./code-preview";
 import { useDiffPanel, useAutoOpenDiffTab, type DiffTab } from "../diff-panel/context";
+import { useExpandAnimation } from "./use-expand-animation";
+import { AnimatedChevron } from "./animated-chevron";
+import { ExpandableContent } from "./expandable-content";
 
 export function EditToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
@@ -55,13 +58,14 @@ export function EditToolCall({ tc }: { tc: ToolCallInfo }) {
 
   useAutoOpenDiffTab(tab, isRunning);
 
-  const [expanded, setExpanded] = useState(!usesSidebar && isWideScreen && isRunning);
+  const showInlinePreview = !usesSidebar && isWideScreen;
+  const anim = useExpandAnimation({ initialExpanded: showInlinePreview && isRunning });
 
   useEffect(() => {
-    if (!usesSidebar && isRunning && isWideScreen) setExpanded(true);
-  }, [usesSidebar, isRunning, isWideScreen]);
+    if (showInlinePreview && isRunning && !anim.expanded) anim.expand();
+  }, [showInlinePreview, isRunning, anim.expanded, anim.expand]);
 
-  const shouldRenderPreview = !usesSidebar && isWideScreen && expanded && isVisible;
+  const shouldRenderPreview = showInlinePreview && anim.expanded && isVisible;
   const textColor = isDark ? "#CCCCCC" : "#1A1A1A";
   const mutedColor = isDark ? "#888" : "#888";
   const addColor = isDark ? "#3FB950" : "#1A7F37";
@@ -97,18 +101,19 @@ export function EditToolCall({ tc }: { tc: ToolCallInfo }) {
   const hasData = ops.length > 0;
   const activeIndicatorColor = isDark ? "#3B82F6" : "#2563EB";
 
+  const handlePress = () => {
+    if (!isWideScreen) {
+      mobileDiffSheet.open(tab?.id ?? undefined);
+    } else if (usesSidebar && tab) {
+      diffPanel.selectTab(tab);
+    } else {
+      anim.toggle();
+    }
+  };
+
   return (
     <View>
-      <Pressable style={styles.row} onPress={() => {
-        if (!isWideScreen) {
-          mobileDiffSheet.open(tab?.id ?? undefined);
-        } else if (usesSidebar && tab) {
-          diffPanel.selectTab(tab);
-        } else {
-          animateLayout();
-          setExpanded((v) => !v);
-        }
-      }}>
+      <Pressable style={styles.row} onPress={handlePress}>
         {isActiveInSidebar && (
           <View style={{ width: 3, height: 14, borderRadius: 1.5, backgroundColor: activeIndicatorColor, marginRight: 4 }} />
         )}
@@ -121,73 +126,80 @@ export function EditToolCall({ tc }: { tc: ToolCallInfo }) {
             <Text style={[styles.status, { color: mutedColor }]}> {statusLabel}</Text>
           ) : null}
         </Text>
-        {usesSidebar ? null : !isWideScreen ? null : expanded
-          ? <ChevronDown size={13} color={mutedColor} strokeWidth={1.8} />
-          : <ChevronRight size={13} color={mutedColor} strokeWidth={1.8} />
-        }
+        {showInlinePreview ? (
+          <AnimatedChevron style={anim.chevronStyle} color={mutedColor} />
+        ) : null}
       </Pressable>
 
-      {shouldRenderPreview && (hasData || isRunning) && (
-        <View
-          style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}
-          onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+      {showInlinePreview && (
+        <ExpandableContent
+          shouldRender={anim.shouldRender}
+          containerStyle={anim.containerStyle}
+          onMeasure={anim.onMeasure}
         >
-          <View style={[editStyles.toolbar, { backgroundColor: toolbarBg, borderBottomColor: toolbarBorder }]}>
-            <Text style={[editStyles.toolbarPath, { color: mutedColor }]} numberOfLines={1}>{path}</Text>
-            <View style={editStyles.viewToggle}>
-              <Pressable
-                onPress={() => setViewMode("inline")}
-                style={[editStyles.viewToggleBtn, viewMode === "inline" && { backgroundColor: activeBtnBg }]}
-              >
-                <Rows2 size={12} color={viewMode === "inline" ? textColor : mutedColor} strokeWidth={1.8} />
-              </Pressable>
-              <Pressable
-                onPress={() => setViewMode("split")}
-                style={[editStyles.viewToggleBtn, viewMode === "split" && { backgroundColor: activeBtnBg }]}
-              >
-                <Columns2 size={12} color={viewMode === "split" ? textColor : mutedColor} strokeWidth={1.8} />
-              </Pressable>
-            </View>
-          </View>
+          {(hasData || isRunning) ? (
+            <View
+              style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}
+              onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+            >
+              <View style={[editStyles.toolbar, { backgroundColor: toolbarBg, borderBottomColor: toolbarBorder }]}>
+                <Text style={[editStyles.toolbarPath, { color: mutedColor }]} numberOfLines={1}>{path}</Text>
+                <View style={editStyles.viewToggle}>
+                  <Pressable
+                    onPress={() => setViewMode("inline")}
+                    style={[editStyles.viewToggleBtn, viewMode === "inline" && { backgroundColor: activeBtnBg }]}
+                  >
+                    <Rows2 size={12} color={viewMode === "inline" ? textColor : mutedColor} strokeWidth={1.8} />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setViewMode("split")}
+                    style={[editStyles.viewToggleBtn, viewMode === "split" && { backgroundColor: activeBtnBg }]}
+                  >
+                    <Columns2 size={12} color={viewMode === "split" ? textColor : mutedColor} strokeWidth={1.8} />
+                  </Pressable>
+                </View>
+              </View>
 
-          {hasData ? (
-            <ScrollView style={editStyles.scrollV} nestedScrollEnabled>
-              {viewMode === "split" ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <SplitDiffView rows={sideBySideRows} containerWidth={containerWidth} isDark={isDark} removeBg={removeBg} addBg={addBg} emptyBg={emptyBg} lineNoBg={lineNoBg} lineNoColor={lineNoColor} dividerColor={dividerColor} contextTextColor={textColor} addTextColor={addColor} removeTextColor={removeColor} />
+              {hasData ? (
+                <ScrollView style={editStyles.scrollV} nestedScrollEnabled>
+                  {viewMode === "split" ? (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <SplitDiffView rows={sideBySideRows} containerWidth={containerWidth} isDark={isDark} removeBg={removeBg} addBg={addBg} emptyBg={emptyBg} lineNoBg={lineNoBg} lineNoColor={lineNoColor} dividerColor={dividerColor} contextTextColor={textColor} addTextColor={addColor} removeTextColor={removeColor} />
+                    </ScrollView>
+                  ) : (
+                    <View>
+                      {inlineRows.map((row, i) => {
+                        const rowBg = row.type === "added" ? addBg : row.type === "removed" ? removeBg : undefined;
+                        const prefix = row.type === "added" ? "+" : row.type === "removed" ? "-" : " ";
+                        const prefixColor = row.type === "added" ? addColor : row.type === "removed" ? removeColor : mutedColor;
+                        return (
+                          <View key={i} style={[editStyles.inlineRow, rowBg ? { backgroundColor: rowBg } : undefined]}>
+                            <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
+                              <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.oldLineNo ?? ""}</Text>
+                            </View>
+                            <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
+                              <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.newLineNo ?? ""}</Text>
+                            </View>
+                            <Text style={[editStyles.prefix, { color: prefixColor }]}>{prefix}</Text>
+                            <PlainCodeText
+                              line={row.text}
+                              color={row.type === "added" ? addColor : row.type === "removed" ? removeColor : textColor}
+                              style={editStyles.lineText}
+                            />
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
                 </ScrollView>
               ) : (
-                <View>
-                  {inlineRows.map((row, i) => {
-                    const rowBg = row.type === "added" ? addBg : row.type === "removed" ? removeBg : undefined;
-                    const prefix = row.type === "added" ? "+" : row.type === "removed" ? "-" : " ";
-                    const prefixColor = row.type === "added" ? addColor : row.type === "removed" ? removeColor : mutedColor;
-                    return (
-                      <View key={i} style={[editStyles.inlineRow, rowBg ? { backgroundColor: rowBg } : undefined]}>
-                        <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
-                          <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.oldLineNo ?? ""}</Text>
-                        </View>
-                        <View style={[editStyles.lineNoCol, { backgroundColor: lineNoBg }]}>
-                          <Text style={[editStyles.lineNo, { color: lineNoColor }]}>{row.newLineNo ?? ""}</Text>
-                        </View>
-                        <Text style={[editStyles.prefix, { color: prefixColor }]}>{prefix}</Text>
-                        <PlainCodeText
-                          line={row.text}
-                          color={row.type === "added" ? addColor : row.type === "removed" ? removeColor : textColor}
-                          style={editStyles.lineText}
-                        />
-                      </View>
-                    );
-                  })}
+                <View style={editStyles.pendingState}>
+                  <Text style={[editStyles.pendingText, { color: mutedColor }]}>{statusLabel ?? "Preparing diff..."}</Text>
                 </View>
               )}
-            </ScrollView>
-          ) : (
-            <View style={editStyles.pendingState}>
-              <Text style={[editStyles.pendingText, { color: mutedColor }]}>{statusLabel ?? "Preparing diff..."}</Text>
             </View>
-          )}
-        </View>
+          ) : null}
+        </ExpandableContent>
       )}
     </View>
   );

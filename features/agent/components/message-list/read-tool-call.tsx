@@ -1,12 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
-import { ChevronDown, ChevronRight } from "lucide-react-native";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import type { ToolCallInfo } from "../../types";
 import { getToolStatusLabel, isToolCallActive, parseToolArguments } from "./tool-call-utils";
 import { useIsMessageVisible } from "./visibility-context";
-import { animateLayout, basename, countLines, sharedStyles as styles } from "./tool-call-shared";
+import { basename, countLines, sharedStyles as styles } from "./tool-call-shared";
 import {
   CodePreview,
   buildCodeRows,
@@ -14,6 +13,9 @@ import {
   parseReadOutput,
   toolMetaStyles,
 } from "./code-preview";
+import { useExpandAnimation } from "./use-expand-animation";
+import { AnimatedChevron } from "./animated-chevron";
+import { ExpandableContent } from "./expandable-content";
 
 export function ReadToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
@@ -21,7 +23,12 @@ export function ReadToolCall({ tc }: { tc: ToolCallInfo }) {
   const isRunning = isToolCallActive(tc);
   const isVisible = useIsMessageVisible();
   const statusLabel = getToolStatusLabel(tc);
-  const [expanded, setExpanded] = useState(false);
+
+  const anim = useExpandAnimation();
+
+  useEffect(() => {
+    if (isRunning && !anim.expanded) anim.expand();
+  }, [isRunning, anim.expanded, anim.expand]);
 
   const parsed = parseToolArguments(tc.arguments);
   const path = parsed.path ?? "";
@@ -29,7 +36,7 @@ export function ReadToolCall({ tc }: { tc: ToolCallInfo }) {
   const output = tc.result ?? "";
   const parsedOutput = useMemo(() => parseReadOutput(output), [output]);
   const startLine = (parsed.offset ?? 0) + 1;
-  const shouldRenderPreview = expanded && isVisible;
+  const shouldRenderPreview = anim.expanded && isVisible;
   const rows = useMemo(
     () => (shouldRenderPreview ? buildCodeRows(parsedOutput.body, startLine) : []),
     [parsedOutput.body, shouldRenderPreview, startLine],
@@ -51,7 +58,7 @@ export function ReadToolCall({ tc }: { tc: ToolCallInfo }) {
 
   return (
     <View>
-      <Pressable style={styles.row} onPress={() => { animateLayout(); setExpanded((v) => !v); }}>
+      <Pressable style={styles.row} onPress={anim.toggle}>
         <Text style={styles.singleLine} numberOfLines={1}>
           <Text style={[styles.verb, { color: textColor }]}>Read</Text>
           <Text style={[styles.detail, { color: mutedColor }]}> {fileName}</Text>
@@ -62,53 +69,56 @@ export function ReadToolCall({ tc }: { tc: ToolCallInfo }) {
             <Text style={[styles.status, { color: mutedColor }]}> {statusLabel}</Text>
           ) : null}
         </Text>
-        {expanded
-          ? <ChevronDown size={13} color={mutedColor} strokeWidth={1.8} />
-          : <ChevronRight size={13} color={mutedColor} strokeWidth={1.8} />
-        }
+        <AnimatedChevron style={anim.chevronStyle} color={mutedColor} />
       </Pressable>
 
-      {shouldRenderPreview && (rows.length > 0 || isRunning || !!output) && (
-        <View style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}>
-          <View
-            style={[editStyles.toolbar, { backgroundColor: toolbarBg, borderBottomColor: toolbarBorder }]}
-          >
-            <Text style={[editStyles.toolbarPath, { color: mutedColor }]} numberOfLines={1}>
-              {path}
-            </Text>
-            <View style={toolMetaStyles.row}>
-              {parsed.limit != null ? (
-                <Text style={[toolMetaStyles.text, { color: mutedColor }]}>
-                  {parsed.limit} lines
-                </Text>
-              ) : null}
-              {lineRange ? (
-                <Text style={[toolMetaStyles.text, { color: mutedColor }]}>
-                  {lineRange}
-                </Text>
-              ) : null}
+      <ExpandableContent
+        shouldRender={anim.shouldRender}
+        containerStyle={anim.containerStyle}
+        onMeasure={anim.onMeasure}
+      >
+        {(rows.length > 0 || isRunning || !!output) ? (
+          <View style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}>
+            <View
+              style={[editStyles.toolbar, { backgroundColor: toolbarBg, borderBottomColor: toolbarBorder }]}
+            >
+              <Text style={[editStyles.toolbarPath, { color: mutedColor }]} numberOfLines={1}>
+                {path}
+              </Text>
+              <View style={toolMetaStyles.row}>
+                {parsed.limit != null ? (
+                  <Text style={[toolMetaStyles.text, { color: mutedColor }]}>
+                    {parsed.limit} lines
+                  </Text>
+                ) : null}
+                {lineRange ? (
+                  <Text style={[toolMetaStyles.text, { color: mutedColor }]}>
+                    {lineRange}
+                  </Text>
+                ) : null}
+              </View>
             </View>
+
+            {rows.length > 0 ? (
+              <CodePreview rows={rows} isDark={isDark} lineNoBg={lineNoBg} lineNoColor={lineNoColor} />
+            ) : (
+              <View style={editStyles.pendingState}>
+                <Text style={[editStyles.pendingText, { color: mutedColor }]}>
+                  {tc.isError ? output : statusLabel ?? "Waiting for file contents..."}
+                </Text>
+              </View>
+            )}
+
+            {parsedOutput.remainingLines != null && parsedOutput.nextOffset != null ? (
+              <View style={toolMetaStyles.footer}>
+                <Text style={[toolMetaStyles.text, { color: mutedColor }]}>
+                  {parsedOutput.remainingLines} more lines available at offset {parsedOutput.nextOffset}
+                </Text>
+              </View>
+            ) : null}
           </View>
-
-          {rows.length > 0 ? (
-            <CodePreview rows={rows} isDark={isDark} lineNoBg={lineNoBg} lineNoColor={lineNoColor} />
-          ) : (
-            <View style={editStyles.pendingState}>
-              <Text style={[editStyles.pendingText, { color: mutedColor }]}>
-                {tc.isError ? output : statusLabel ?? "Waiting for file contents..."}
-              </Text>
-            </View>
-          )}
-
-          {parsedOutput.remainingLines != null && parsedOutput.nextOffset != null ? (
-            <View style={toolMetaStyles.footer}>
-              <Text style={[toolMetaStyles.text, { color: mutedColor }]}>
-                {parsedOutput.remainingLines} more lines available at offset {parsedOutput.nextOffset}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      )}
+        ) : null}
+      </ExpandableContent>
     </View>
   );
 }

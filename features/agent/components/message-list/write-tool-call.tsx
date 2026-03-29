@@ -1,19 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
-import { ChevronDown, ChevronRight } from "lucide-react-native";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useResponsiveLayout } from "@/features/navigation/hooks/use-responsive-layout";
 import type { ToolCallInfo } from "../../types";
 import { getToolStatusLabel, isToolCallActive, parseToolArguments } from "./tool-call-utils";
 import { useIsMessageVisible, useMobileDiffSheet } from "./visibility-context";
-import { animateLayout, basename, countLines, sharedStyles as styles } from "./tool-call-shared";
+import { basename, countLines, sharedStyles as styles } from "./tool-call-shared";
 import {
   CodePreview,
   buildCodeRows,
   editStyles,
 } from "./code-preview";
 import { useDiffPanel, useAutoOpenDiffTab, type DiffTab } from "../diff-panel/context";
+import { useExpandAnimation } from "./use-expand-animation";
+import { AnimatedChevron } from "./animated-chevron";
+import { ExpandableContent } from "./expandable-content";
 
 export function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
@@ -42,13 +44,14 @@ export function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
 
   useAutoOpenDiffTab(tab, isRunning);
 
-  const [expanded, setExpanded] = useState(!usesSidebar && isWideScreen && isRunning);
+  const showInlinePreview = !usesSidebar && isWideScreen;
+  const anim = useExpandAnimation({ initialExpanded: showInlinePreview && isRunning });
 
   useEffect(() => {
-    if (!usesSidebar && isRunning && isWideScreen) setExpanded(true);
-  }, [usesSidebar, isRunning, isWideScreen]);
+    if (showInlinePreview && isRunning && !anim.expanded) anim.expand();
+  }, [showInlinePreview, isRunning, anim.expanded, anim.expand]);
 
-  const shouldRenderPreview = !usesSidebar && isWideScreen && expanded && isVisible;
+  const shouldRenderPreview = showInlinePreview && anim.expanded && isVisible;
   const previewRows = useMemo(
     () => (shouldRenderPreview ? buildCodeRows(newText, 1) : []),
     [newText, shouldRenderPreview],
@@ -65,18 +68,19 @@ export function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
   const toolbarBorder = isDark ? "#2A2A2A" : "#E0E0E0";
   const activeIndicatorColor = isDark ? "#3B82F6" : "#2563EB";
 
+  const handlePress = () => {
+    if (!isWideScreen) {
+      mobileDiffSheet.open(tab?.id ?? undefined);
+    } else if (usesSidebar && tab) {
+      diffPanel.selectTab(tab);
+    } else {
+      anim.toggle();
+    }
+  };
+
   return (
     <View>
-      <Pressable style={styles.row} onPress={() => {
-        if (!isWideScreen) {
-          mobileDiffSheet.open(tab?.id ?? undefined);
-        } else if (usesSidebar && tab) {
-          diffPanel.selectTab(tab);
-        } else {
-          animateLayout();
-          setExpanded((v) => !v);
-        }
-      }}>
+      <Pressable style={styles.row} onPress={handlePress}>
         {isActiveInSidebar && (
           <View style={{ width: 3, height: 14, borderRadius: 1.5, backgroundColor: activeIndicatorColor, marginRight: 4 }} />
         )}
@@ -90,26 +94,33 @@ export function WriteToolCall({ tc }: { tc: ToolCallInfo }) {
             <Text style={[styles.status, { color: mutedColor }]}> {statusLabel}</Text>
           ) : null}
         </Text>
-        {usesSidebar ? null : !isWideScreen ? null : expanded
-          ? <ChevronDown size={13} color={mutedColor} strokeWidth={1.8} />
-          : <ChevronRight size={13} color={mutedColor} strokeWidth={1.8} />
-        }
+        {showInlinePreview ? (
+          <AnimatedChevron style={anim.chevronStyle} color={mutedColor} />
+        ) : null}
       </Pressable>
 
-      {shouldRenderPreview && (previewRows.length > 0 || isRunning) && (
-        <View style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}>
-          <View style={[editStyles.toolbar, { backgroundColor: toolbarBg, borderBottomColor: toolbarBorder }]}>
-            <Text style={[editStyles.toolbarPath, { color: mutedColor }]} numberOfLines={1}>{path}</Text>
-          </View>
+      {showInlinePreview && (
+        <ExpandableContent
+          shouldRender={anim.shouldRender}
+          containerStyle={anim.containerStyle}
+          onMeasure={anim.onMeasure}
+        >
+          {(previewRows.length > 0 || isRunning) ? (
+            <View style={[editStyles.box, { backgroundColor: boxBg, borderColor: boxBorder }]}>
+              <View style={[editStyles.toolbar, { backgroundColor: toolbarBg, borderBottomColor: toolbarBorder }]}>
+                <Text style={[editStyles.toolbarPath, { color: mutedColor }]} numberOfLines={1}>{path}</Text>
+              </View>
 
-          {previewRows.length > 0 ? (
-            <CodePreview rows={previewRows} isDark={isDark} lineNoBg={lineNoBg} lineNoColor={lineNoColor} />
-          ) : (
-            <View style={editStyles.pendingState}>
-              <Text style={[editStyles.pendingText, { color: mutedColor }]}>Writing file...</Text>
+              {previewRows.length > 0 ? (
+                <CodePreview rows={previewRows} isDark={isDark} lineNoBg={lineNoBg} lineNoColor={lineNoColor} />
+              ) : (
+                <View style={editStyles.pendingState}>
+                  <Text style={[editStyles.pendingText, { color: mutedColor }]}>Writing file...</Text>
+                </View>
+              )}
             </View>
-          )}
-        </View>
+          ) : null}
+        </ExpandableContent>
       )}
     </View>
   );

@@ -7,7 +7,6 @@ import type { ToolCallInfo } from "../../types";
 import { getToolStatusLabel, isToolCallActive } from "./tool-call-utils";
 import {
   MAX_VISIBLE_GROUP_ITEMS,
-  animateLayout,
   formatSingleCall,
   multiGroupLabelParts,
   sharedStyles as styles,
@@ -18,11 +17,9 @@ import { WriteToolCall } from "./write-tool-call";
 import { EditToolCall } from "./edit-tool-call";
 import { DownloadToolCall } from "./download-tool-call";
 import { SubagentToolCall } from "./subagent-tool-call";
-import { ToolCallCard } from "./tool-call-card";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+import { useExpandAnimation } from "./use-expand-animation";
+import { AnimatedChevron } from "./animated-chevron";
+import { ExpandableContent } from "./expandable-content";
 
 function areToolCallArraysEqual(left: ToolCallInfo[], right: ToolCallInfo[]): boolean {
   if (left === right) return true;
@@ -64,22 +61,10 @@ function AnimatedNumber({ value, style }: { value: number; style?: any }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// SingleToolCall — dispatches to the correct renderer
-// ---------------------------------------------------------------------------
-
-function SingleToolCall({ tc }: { tc: ToolCallInfo }) {
+function GenericToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
   const colors = Colors[colorScheme];
   const isDark = colorScheme === "dark";
-  const [expanded, setExpanded] = useState(false);
-
-  if (tc.name === "bash") return <BashToolCall tc={tc} />;
-  if (tc.name === "read") return <ReadToolCall tc={tc} />;
-  if (tc.name === "write") return <WriteToolCall tc={tc} />;
-  if (tc.name === "edit") return <EditToolCall tc={tc} />;
-  if (tc.name === "download") return <DownloadToolCall tc={tc} />;
-  if (tc.name === "subagent") return <SubagentToolCall tc={tc} />;
 
   const { verb, detail, diffAdded, diffRemoved } = formatSingleCall(tc);
   const output = tc.result ?? tc.partialResult;
@@ -89,11 +74,13 @@ function SingleToolCall({ tc }: { tc: ToolCallInfo }) {
   const addColor = isDark ? "#3FB950" : "#1A7F37";
   const removeColor = isDark ? "#F85149" : "#CF222E";
 
+  const anim = useExpandAnimation();
+
   return (
     <View>
       <Pressable
         style={styles.row}
-        onPress={() => { if (output) { animateLayout(); setExpanded((v) => !v); } }}
+        onPress={() => { if (output) anim.toggle(); }}
       >
         <Text style={styles.singleLine} numberOfLines={1}>
           <Text style={[styles.verb, { color: textColor }]}>{verb}</Text>
@@ -110,34 +97,53 @@ function SingleToolCall({ tc }: { tc: ToolCallInfo }) {
             <Text style={[styles.status, { color: mutedColor }]}> {statusLabel}</Text>
           ) : null}
         </Text>
+        {output ? (
+          <AnimatedChevron style={anim.chevronStyle} color={mutedColor} />
+        ) : null}
       </Pressable>
 
-      {expanded && output && (
-        <View style={groupStyles.expandedOutput}>
-          <Text
-            style={[
-              groupStyles.outputText,
-              {
-                color: tc.isError
-                  ? colors.destructive
-                  : isDark ? "#555" : "#888",
-              },
-            ]}
-            selectable
-          >
-            {output.length > 2000
-              ? output.slice(0, 2000) + "\n… truncated"
-              : output}
-          </Text>
-        </View>
-      )}
+      {output ? (
+        <ExpandableContent
+          shouldRender={anim.shouldRender}
+          containerStyle={anim.containerStyle}
+          onMeasure={anim.onMeasure}
+        >
+          <View style={groupStyles.expandedOutput}>
+            <Text
+              style={[
+                groupStyles.outputText,
+                {
+                  color: tc.isError
+                    ? colors.destructive
+                    : isDark ? "#555" : "#888",
+                },
+              ]}
+              selectable
+            >
+              {output.length > 2000
+                ? output.slice(0, 2000) + "\n… truncated"
+                : output}
+            </Text>
+          </View>
+        </ExpandableContent>
+      ) : null}
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// ToolCallGroup — groups multiple calls of the same type
-// ---------------------------------------------------------------------------
+const KNOWN_TOOLS: Record<string, React.ComponentType<{ tc: ToolCallInfo }>> = {
+  bash: BashToolCall,
+  read: ReadToolCall,
+  write: WriteToolCall,
+  edit: EditToolCall,
+  download: DownloadToolCall,
+  subagent: SubagentToolCall,
+};
+
+function SingleToolCall({ tc }: { tc: ToolCallInfo }) {
+  const Component = KNOWN_TOOLS[tc.name] ?? GenericToolCall;
+  return <Component tc={tc} />;
+}
 
 function ToolCallGroupComponent({
   toolName,
@@ -148,34 +154,34 @@ function ToolCallGroupComponent({
 }) {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
-  const [expanded, setExpanded] = useState(false);
   const textColor = isDark ? "#CCCCCC" : "#1A1A1A";
   const activeCall = calls.find((call) => isToolCallActive(call));
   const groupStatusLabel = activeCall ? getToolStatusLabel(activeCall) : null;
 
-  useEffect(() => {
-    if (groupStatusLabel) setExpanded(true);
-  }, [groupStatusLabel]);
+  const anim = useExpandAnimation();
 
-  const toggle = useCallback(() => { animateLayout(); setExpanded((v) => !v); }, []);
-  const groupParts = multiGroupLabelParts(toolName, calls.length);
+  useEffect(() => {
+    if (groupStatusLabel && !anim.expanded) anim.expand();
+  }, [groupStatusLabel, anim.expanded, anim.expand]);
 
   const [showAll, setShowAll] = useState(false);
+  const showMoreAnim = useExpandAnimation();
   const mutedColor = isDark ? "#888" : "#888";
 
   if (calls.length === 1) {
     return <SingleToolCall tc={calls[0]} />;
   }
 
+  const groupParts = multiGroupLabelParts(toolName, calls.length);
   const hasMore = calls.length > MAX_VISIBLE_GROUP_ITEMS;
-  const visibleCalls = expanded
+  const visibleCalls = anim.expanded
     ? (showAll ? calls : calls.slice(0, MAX_VISIBLE_GROUP_ITEMS))
     : [];
   const hiddenCount = calls.length - MAX_VISIBLE_GROUP_ITEMS;
 
   return (
     <View>
-      <Pressable style={styles.row} onPress={toggle}>
+      <Pressable style={styles.row} onPress={anim.toggle}>
         <View style={groupStyles.animatedLabelRow}>
           {groupParts.before ? (
             <Text style={[groupStyles.label, { color: textColor }]}>{groupParts.before}</Text>
@@ -194,9 +200,14 @@ function ToolCallGroupComponent({
             </Text>
           ) : null}
         </View>
+        <AnimatedChevron style={anim.chevronStyle} color={mutedColor} />
       </Pressable>
 
-      {expanded && (
+      <ExpandableContent
+        shouldRender={anim.shouldRender}
+        containerStyle={anim.containerStyle}
+        onMeasure={anim.onMeasure}
+      >
         <View style={groupStyles.expandedList}>
           {visibleCalls.map((tc) => (
             <SingleToolCall key={tc.id} tc={tc} />
@@ -204,7 +215,10 @@ function ToolCallGroupComponent({
           {hasMore && !showAll && (
             <Pressable
               style={groupStyles.showMoreBtn}
-              onPress={() => { animateLayout(); setShowAll(true); }}
+              onPress={() => {
+                setShowAll(true);
+                showMoreAnim.expand();
+              }}
             >
               <Text style={[groupStyles.showMoreText, { color: mutedColor }]}>
                 Show {hiddenCount} more…
@@ -212,7 +226,7 @@ function ToolCallGroupComponent({
             </Pressable>
           )}
         </View>
-      )}
+      </ExpandableContent>
     </View>
   );
 }
@@ -224,17 +238,13 @@ export const ToolCallGroup = memo(
     areToolCallArraysEqual(prev.calls, next.calls),
 );
 
-// ---------------------------------------------------------------------------
-// Grouping logic
-// ---------------------------------------------------------------------------
-
 export interface ToolCallRenderItem {
   key: string;
   toolName: string;
   calls: ToolCallInfo[];
 }
 
-const NEVER_GROUP = new Set(["bash", "write", "edit"]);
+const NEVER_GROUP = new Set(["bash", "write", "edit", "download"]);
 
 function stableToolCallId(tc: ToolCallInfo): string {
   return tc.previousId ?? tc.id;
@@ -274,10 +284,6 @@ export function groupToolCalls(
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
 const groupStyles = StyleSheet.create({
   label: {
     fontSize: 13,
@@ -305,7 +311,7 @@ const groupStyles = StyleSheet.create({
     paddingLeft: 8,
     paddingTop: 8,
     paddingBottom: 4,
-    maxHeight: 300,
+    maxHeight: 200,
   },
   outputText: {
     fontSize: 11,

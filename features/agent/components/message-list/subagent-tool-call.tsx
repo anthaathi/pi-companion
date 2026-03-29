@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { ChevronDown, ChevronRight } from "lucide-react-native";
 
 import { Fonts } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import type { ToolCallInfo } from "../../types";
 import { getToolStatusLabel, isToolCallActive, parseToolArguments } from "./tool-call-utils";
-import { animateLayout, sharedStyles as styles } from "./tool-call-shared";
+import { sharedStyles as styles } from "./tool-call-shared";
+import { useExpandAnimation } from "./use-expand-animation";
+import { AnimatedChevron } from "./animated-chevron";
+import { ExpandableContent } from "./expandable-content";
 
 function ShimmerLine({ width, isDark, delay = 0 }: { width: number | string; isDark: boolean; delay?: number }) {
   const shimmer = useRef(new Animated.Value(0)).current;
@@ -71,11 +73,12 @@ export function SubagentToolCall({ tc }: { tc: ToolCallInfo }) {
   const isDark = colorScheme === "dark";
   const isRunning = isToolCallActive(tc);
   const isComplete = tc.status === "complete" || tc.status === "error";
-  const [expanded, setExpanded] = useState(!isComplete);
+
+  const anim = useExpandAnimation({ initialExpanded: !isComplete });
 
   useEffect(() => {
-    if (isRunning) setExpanded(true);
-  }, [isRunning]);
+    if (isRunning && !anim.expanded) anim.expand();
+  }, [isRunning, anim.expanded, anim.expand]);
 
   const parsed = parseToolArguments(tc.arguments);
   const agentType = parsed.agent ?? "agent";
@@ -89,8 +92,6 @@ export function SubagentToolCall({ tc }: { tc: ToolCallInfo }) {
   const boxBg = isDark ? "#0D0D0D" : "#FAFAFA";
   const stepBg = isDark ? "#141414" : "#F5F5F5";
 
-  const toggle = useCallback(() => { animateLayout(); setExpanded((v) => !v); }, []);
-
   const steps = useMemo(
     () => (output && isComplete ? parseSubagentSteps(output) : []),
     [output, isComplete],
@@ -98,18 +99,19 @@ export function SubagentToolCall({ tc }: { tc: ToolCallInfo }) {
 
   return (
     <View>
-      <Pressable style={styles.row} onPress={toggle}>
+      <Pressable style={styles.row} onPress={anim.toggle}>
         <Text style={styles.singleLine} numberOfLines={1}>
           <Text style={[styles.verb, { color: accentColor }]}>Agent</Text>
           <Text style={[styles.detail, { color: mutedColor }]}> {agentType}</Text>
         </Text>
-        {expanded
-          ? <ChevronDown size={13} color={mutedColor} strokeWidth={1.8} />
-          : <ChevronRight size={13} color={mutedColor} strokeWidth={1.8} />
-        }
+        <AnimatedChevron style={anim.chevronStyle} color={mutedColor} />
       </Pressable>
 
-      {expanded && (
+      <ExpandableContent
+        shouldRender={anim.shouldRender}
+        containerStyle={anim.containerStyle}
+        onMeasure={anim.onMeasure}
+      >
         <View style={[subagentStyles.box, { backgroundColor: boxBg, borderColor }]}>
           {task ? (
             <View style={[subagentStyles.taskRow, { borderBottomColor: borderColor }]}>
@@ -170,7 +172,7 @@ export function SubagentToolCall({ tc }: { tc: ToolCallInfo }) {
             </ScrollView>
           )}
         </View>
-      )}
+      </ExpandableContent>
     </View>
   );
 }
@@ -191,6 +193,6 @@ const subagentStyles = StyleSheet.create({
   stepRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, gap: 6 },
   stepVerb: { fontSize: 12, fontFamily: Fonts.sansSemiBold, fontWeight: "600" },
   stepDetail: { fontSize: 12, fontFamily: Fonts.mono, flex: 1 },
-  scroll: { maxHeight: 400, paddingHorizontal: 12, paddingVertical: 10 },
+  scroll: { maxHeight: 300, paddingHorizontal: 12, paddingVertical: 10 },
   output: { fontSize: 12, fontFamily: Fonts.mono, lineHeight: 18 },
 });

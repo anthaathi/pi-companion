@@ -1,4 +1,4 @@
-import { LayoutAnimation, Platform, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { Fonts } from "@/constants/theme";
 import { parseToolArguments } from "./tool-call-utils";
 import type { ToolCallInfo } from "../../types";
@@ -34,22 +34,6 @@ export const MULTI_GROUP_PARTS: Record<string, { before: string; after: string }
   download: { before: "", after: " downloads" },
   subagent: { before: "Ran ", after: " sub-agents" },
 };
-
-// ---------------------------------------------------------------------------
-// Animation
-// ---------------------------------------------------------------------------
-
-const EXPAND_ANIM = LayoutAnimation.create(
-  200,
-  LayoutAnimation.Types.easeInEaseOut,
-  LayoutAnimation.Properties.opacity,
-);
-
-export function animateLayout() {
-  if (Platform.OS !== "web") {
-    LayoutAnimation.configureNext(EXPAND_ANIM);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Helpers

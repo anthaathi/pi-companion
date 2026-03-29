@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { ChevronDown, ChevronRight } from "lucide-react-native";
 
 import { Fonts } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import type { ToolCallInfo } from "../../types";
 import { getToolStatusLabel, isToolCallActive, parseBashCommand, parseToolArguments } from "./tool-call-utils";
-import { animateLayout, sharedStyles as styles } from "./tool-call-shared";
+import { sharedStyles as styles } from "./tool-call-shared";
+import { useExpandAnimation } from "./use-expand-animation";
+import { AnimatedChevron } from "./animated-chevron";
+import { ExpandableContent } from "./expandable-content";
 
 export function BashToolCall({ tc }: { tc: ToolCallInfo }) {
   const colorScheme = useColorScheme() ?? "light";
@@ -15,11 +17,12 @@ export function BashToolCall({ tc }: { tc: ToolCallInfo }) {
   const isRunning = isToolCallActive(tc);
   const isComplete = tc.status === "complete" || tc.status === "error";
   const statusLabel = getToolStatusLabel(tc);
-  const [expanded, setExpanded] = useState(!isComplete);
+
+  const anim = useExpandAnimation({ initialExpanded: !isComplete });
 
   useEffect(() => {
-    if (isRunning) setExpanded(true);
-  }, [isRunning]);
+    if (isRunning && !anim.expanded) anim.expand();
+  }, [isRunning, anim.expanded, anim.expand]);
 
   const parsed = parseToolArguments(tc.arguments);
   const rawCommand = parsed.command ?? "";
@@ -31,11 +34,9 @@ export function BashToolCall({ tc }: { tc: ToolCallInfo }) {
   const shortCmd = command.length > 60 ? command.slice(0, 60) + "…" : command;
   const cwdLabel = cwd ? cwd.split("/").slice(-2).join("/") : null;
 
-  const toggle = useCallback(() => { animateLayout(); setExpanded((v) => !v); }, []);
-
   return (
     <View>
-      <Pressable style={styles.row} onPress={toggle}>
+      <Pressable style={styles.row} onPress={anim.toggle}>
         <Text style={styles.singleLine} numberOfLines={1}>
           <Text style={[styles.verb, { color: textColor }]}>Shell</Text>
           <Text style={[styles.detail, { color: mutedColor }]}> {shortCmd}</Text>
@@ -46,13 +47,14 @@ export function BashToolCall({ tc }: { tc: ToolCallInfo }) {
             <Text style={[styles.status, { color: mutedColor }]}> {statusLabel}</Text>
           ) : null}
         </Text>
-        {expanded
-          ? <ChevronDown size={13} color={mutedColor} strokeWidth={1.8} />
-          : <ChevronRight size={13} color={mutedColor} strokeWidth={1.8} />
-        }
+        <AnimatedChevron style={anim.chevronStyle} color={mutedColor} />
       </Pressable>
 
-      {expanded && (
+      <ExpandableContent
+        shouldRender={anim.shouldRender}
+        containerStyle={anim.containerStyle}
+        onMeasure={anim.onMeasure}
+      >
         <View style={[bashStyles.box, {
           backgroundColor: isDark ? "#0D0D0D" : "#F6F6F6",
           borderColor: isDark ? "#2A2A2A" : "#E8E8E8",
@@ -84,7 +86,7 @@ export function BashToolCall({ tc }: { tc: ToolCallInfo }) {
             </ScrollView>
           </ScrollView>
         </View>
-      )}
+      </ExpandableContent>
     </View>
   );
 }
@@ -99,7 +101,7 @@ const bashStyles = StyleSheet.create({
     gap: 6,
   },
   scroll: {
-    maxHeight: 400,
+    maxHeight: 300,
   },
   commandLine: {
     fontSize: 13,
