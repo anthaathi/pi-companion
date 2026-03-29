@@ -7,6 +7,7 @@ import {
   TOOLBAR_CONTROL_HEIGHT,
   TOOLBAR_CORNER_RADIUS,
   TOOLBAR_HORIZONTAL_MARGIN,
+  TOOLBAR_MODE_TOGGLE_HEIGHT,
   TOOLBAR_VERTICAL_PADDING,
   TOOLBAR_WRAP_OFFSET,
 } from "./toolbar";
@@ -71,6 +72,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 4,
+    minHeight: TOOLBAR_MODE_TOGGLE_HEIGHT,
   },
   pill: {
     height: TOOLBAR_CONTROL_HEIGHT,

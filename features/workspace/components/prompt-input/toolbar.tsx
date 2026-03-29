@@ -44,6 +44,7 @@ export const TOOLBAR_CORNER_RADIUS = 12;
 export const TOOLBAR_VERTICAL_PADDING = Platform.OS === 'web' ? 7 : 9;
 export const TOOLBAR_CONTROL_HEIGHT = Platform.OS === 'web' ? 26 : 30;
 export const TOOLBAR_ANDROID_MARGIN_TOP = Platform.OS === 'android' ? -4 : 0;
+export const TOOLBAR_MODE_TOGGLE_HEIGHT = TOOLBAR_CONTROL_HEIGHT + 2 + 2 * TOOLBAR_BORDER_WIDTH;
 
 function ToolbarComponent({
   sessionId,
