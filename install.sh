@@ -168,7 +168,7 @@ fetch_latest_tag() {
       echo "$tag"
       return
     fi
-    dim "  ${tag} has no binary yet, checking previous release..." >&2
+    true
   done
 
   fatal "No release found with a binary for your platform (${os}/${arch}).\n         Builds may still be in progress. Try again in a few minutes."
