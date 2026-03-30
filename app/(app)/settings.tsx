@@ -39,6 +39,7 @@ const {
   status2: getPackageStatus,
   update: updatePackage,
   install: installPackage,
+  version: getVersion,
 } = sdk;
 
 // ─── Shared components ────────────────────────────────────────
@@ -297,6 +298,49 @@ function PackageUpdateSection({
   );
 }
 
+// ─── About Section ────────────────────────────────────────────
+
+function AboutSection({
+  isDark,
+  textPrimary,
+  textMuted,
+}: {
+  isDark: boolean;
+  textPrimary: string;
+  textMuted: string;
+}) {
+  const [serverVersion, setServerVersion] = useState<string>('');
+
+  useEffect(() => {
+    getVersion()
+      .then((res) => {
+        const data = unwrapApiData(res.data) as { version?: string } | undefined;
+        if (data?.version) setServerVersion(data.version);
+      })
+      .catch(() => {});
+  }, []);
+
+  return (
+    <SettingsSection title="About" icon={Info} isDark={isDark} textPrimary={textPrimary}>
+      <SettingsRow
+        label="Server Version"
+        isDark={isDark}
+        right={
+          <Text style={[rowStyles.valueText, { color: textMuted }]}>
+            {serverVersion || '—'}
+          </Text>
+        }
+      />
+      <SettingsRow
+        label="Licenses"
+        isDark={isDark}
+        onPress={() => {}}
+        isLast
+      />
+    </SettingsSection>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────
 
 export default function SettingsScreen() {
@@ -465,19 +509,7 @@ export default function SettingsScreen() {
         </SettingsSection>
 
         {/* About */}
-        <SettingsSection title="About" icon={Info} isDark={isDark} textPrimary={textPrimary}>
-          <SettingsRow
-            label="Version"
-            isDark={isDark}
-            right={<Text style={[rowStyles.valueText, { color: textMuted }]}>1.0.0</Text>}
-          />
-          <SettingsRow
-            label="Licenses"
-            isDark={isDark}
-            onPress={() => {}}
-            isLast
-          />
-        </SettingsSection>
+        <AboutSection isDark={isDark} textPrimary={textPrimary} textMuted={textMuted} />
       </ScrollView>
     </View>
   );
