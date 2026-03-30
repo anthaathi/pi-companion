@@ -73,7 +73,7 @@ export const ToolCallGroup = memo(function ToolCallGroup({
   return (
     <View style={styles.container}>
       {groups.map((g) =>
-        g.calls.length === 1 && g.toolName !== "read" ? (
+        g.calls.length === 1 ? (
           <SingleToolCall key={g.key} tc={g.calls[0]} isDark={isDark} />
         ) : (
           <GroupedToolCalls
@@ -174,6 +174,11 @@ const GroupedToolCalls = memo(function GroupedToolCalls({
   const [showAll, setShowAll] = useState(false);
 
   const activeCall = calls.find(isToolActive);
+
+  useEffect(() => {
+    if (activeCall) setExpanded(true);
+  }, [activeCall]);
+
   const toggle = useCallback(() => setExpanded((p) => !p), []);
 
   const baseParts = GROUP_LABELS[toolName] ?? { before: "", after: ` ${toolName} calls` };

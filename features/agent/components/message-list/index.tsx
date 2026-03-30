@@ -10,7 +10,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
-import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
+import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { ArrowDown } from "lucide-react-native";
 import { useAgentSession } from "@pi-ui/client";
 import { Colors, Fonts } from "@/constants/theme";
@@ -294,7 +294,6 @@ const MessageItem = memo(function MessageItem({
 
   return (
     <Animated.View
-      layout={LinearTransition.duration(180)}
       entering={FadeIn.duration(160)}
       exiting={FadeOut.duration(140)}
       style={styles.itemWrap}
