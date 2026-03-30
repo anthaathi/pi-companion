@@ -167,9 +167,11 @@ get_download_url() {
 # ── Installed version ────────────────────────────────────────────────────────
 
 installed_version() {
-  local bin="${INSTALL_DIR}/${BINARY}"
-  if [ -x "$bin" ]; then
-    "$bin" --version 2>/dev/null | head -1 || echo "unknown"
+  local version_file="${INSTALL_DIR}/.version"
+  if [ -f "$version_file" ]; then
+    cat "$version_file" 2>/dev/null
+  elif [ -x "${INSTALL_DIR}/${BINARY}" ]; then
+    "${INSTALL_DIR}/${BINARY}" --version 2>/dev/null | head -1 || echo "unknown"
   else
     echo ""
   fi
@@ -527,7 +529,11 @@ do_install() {
   current="$(installed_version)"
   if [ -n "$current" ]; then
     info "Currently installed: ${current}"
-    if ! confirm "Update to ${tag}?" "y"; then
+    if [ "$current" = "$tag" ]; then
+      success "Already up to date (${tag})"
+      exit 0
+    fi
+    if ! confirm "Update from ${current} to ${tag}?" "y"; then
       info "Skipped."
       exit 0
     fi
@@ -539,7 +545,10 @@ do_install() {
   url="$(get_download_url "$tag" "$os" "$arch")"
   download_binary "$url" "${INSTALL_DIR}/${BINARY}"
 
-  success "Installed ${BINARY} to ${INSTALL_DIR}"
+  # Persist the installed release tag for update checks
+  echo "$tag" > "${INSTALL_DIR}/.version"
+
+  success "Installed ${BINARY} ${tag} to ${INSTALL_DIR}"
   echo ""
 
   # First-time setup
