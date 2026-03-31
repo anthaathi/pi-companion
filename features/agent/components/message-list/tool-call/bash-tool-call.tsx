@@ -4,6 +4,7 @@ import { Colors, Fonts } from "@/constants/theme";
 import type { ToolCallInfo } from "../../../types";
 import { isToolActive, parseToolArguments, truncateOutput } from "../utils";
 import { AnimatedCollapse } from "../animated-collapse";
+import { ToolResultImages } from "./tool-result-images";
 
 interface BashToolCallProps {
   tc: ToolCallInfo;
@@ -82,6 +83,9 @@ export const BashToolCall = memo(function BashToolCall({
           </ScrollView>
         </View>
       </AnimatedCollapse>
+      {tc.resultImages && tc.resultImages.length > 0 && (
+        <ToolResultImages images={tc.resultImages} isDark={isDark} />
+      )}
     </View>
   );
 });

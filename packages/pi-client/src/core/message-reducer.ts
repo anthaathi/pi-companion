@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolCallInfo, MessageUsageInfo, AgentMode, PendingExtensionUiRequest, SubagentMeta } from "../types/chat-message";
+import type { ChatMessage, ToolCallInfo, ToolResultImage, MessageUsageInfo, AgentMode, PendingExtensionUiRequest, SubagentMeta } from "../types/chat-message";
 import type { AgentStreamEvent, StreamEventEnvelope } from "../types/stream-events";
 
 export interface SessionState {
@@ -35,6 +35,21 @@ function extractTextFromContent(content: unknown[] | undefined): string {
     )
     .map((c) => c.text ?? "")
     .join("");
+}
+
+function extractImagesFromContent(content: unknown[] | undefined): ToolResultImage[] | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const images = content
+    .filter((c): c is { type: string; data: string; mimeType: string } =>
+      typeof c === "object" &&
+      c !== null &&
+      "type" in c &&
+      (c as { type: string }).type === "image" &&
+      "data" in c &&
+      typeof (c as { data: unknown }).data === "string",
+    )
+    .map((c) => ({ data: c.data, mimeType: c.mimeType ?? "image/png" }));
+  return images.length > 0 ? images : undefined;
 }
 
 function extractMessageEntryId(msg: Record<string, unknown>): string | undefined {
@@ -395,6 +410,9 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
       const resultText = event.result
         ? extractTextFromContent(event.result.content as unknown[])
         : undefined;
+      const resultImages = event.result
+        ? extractImagesFromContent(event.result.content as unknown[])
+        : undefined;
       const resultDetails = (event.result as any)?.details;
       const subagentMeta = resultDetails ? extractSubagentMeta(resultDetails) : undefined;
       const diff = resultDetails && typeof resultDetails.diff === "string" ? resultDetails.diff : undefined;
@@ -402,6 +420,7 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
         ...tc,
         status: event.isError ? "error" : "complete",
         result: resultText,
+        resultImages,
         isError: event.isError,
         ...(subagentMeta ? { subagentMeta } : {}),
         ...(diff ? { diff } : {}),
@@ -619,6 +638,7 @@ export function convertRawMessages(rawMessages: Record<string, string>[]): ChatM
         );
         if (!tc) continue;
         tc.result = extractTextFromContent(raw["content"] as unknown[] | undefined);
+        tc.resultImages = extractImagesFromContent(raw["content"] as unknown[] | undefined);
         tc.isError = raw["isError"] as boolean;
         tc.status = raw["isError"] ? "error" : "complete";
         const details = raw["details"] as Record<string, unknown> | undefined;

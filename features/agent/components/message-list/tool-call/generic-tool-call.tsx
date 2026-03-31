@@ -4,6 +4,7 @@ import { Colors, Fonts } from "@/constants/theme";
 import type { ToolCallInfo } from "../../../types";
 import { toolDisplayName } from "../utils";
 import { AnimatedCollapse } from "../animated-collapse";
+import { ToolResultImages } from "./tool-result-images";
 
 interface GenericToolCallProps {
   tc: ToolCallInfo;
@@ -18,16 +19,19 @@ export const GenericToolCall = memo(function GenericToolCall({
   const [expanded, setExpanded] = useState(false);
   const toggle = useCallback(() => setExpanded((p) => !p), []);
 
+  const hasImages = !!(tc.resultImages && tc.resultImages.length > 0);
   const hasResult = !!tc.result || !!tc.partialResult;
+  const hasContent = hasResult || hasImages;
   const resultText = tc.result || tc.partialResult || "";
 
   return (
     <View>
-      <Pressable onPress={hasResult ? toggle : undefined} style={styles.header}>
+      <Pressable onPress={hasContent ? toggle : undefined} style={styles.header}>
         <Text style={[styles.name, { color: colors.textSecondary }]}>
           {toolDisplayName(tc.name)}
         </Text>
       </Pressable>
+      {hasImages && <ToolResultImages images={tc.resultImages!} isDark={isDark} />}
       <AnimatedCollapse expanded={expanded && hasResult} maxHeight={350}>
         <View style={[styles.resultBox, { backgroundColor: colors.surfaceRaised }]}>
           <Text

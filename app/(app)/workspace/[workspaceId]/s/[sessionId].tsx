@@ -23,9 +23,11 @@ import { DiffPanelProvider } from "@/features/agent/components/diff-panel/contex
 import { DiffSidebar } from "@/features/agent/components/diff-panel";
 import { MobileDiffSheetProvider } from "@/features/agent/components/message-list/mobile-diff-sheet";
 import { useAgentSession, useConnection, useWorkspaceSessions as useSessions } from "@pi-ui/client";
+import type { ImageContent } from "@pi-ui/client";
 import { requestBrowserNotificationPermission } from "@/features/agent/browser-notifications";
 import type { PendingExtensionUiRequest as LegacyPendingUiRequest } from "@/features/agent/extension-ui";
 import type { ChatMessage } from "@/features/agent/types";
+import type { Attachment } from "@/features/workspace/components/prompt-input/constants";
 
 export default function SessionScreen() {
   const { workspaceId, sessionId } = useLocalSearchParams<{
@@ -76,12 +78,26 @@ export default function SessionScreen() {
   const handleSend = useCallback(
     async (
       text: string,
-      _attachments: unknown[],
+      attachments: Attachment[],
       options?: { queueBehavior?: "steer" | "followUp" },
     ) => {
       if (!sessionId || inputBlockedByConnection) return;
       setAlertMessage(null);
       requestBrowserNotificationPermission();
+
+      let images: ImageContent[] | undefined;
+      const imageAttachments = attachments.filter((a) => a.type === "image" && a.preview);
+      if (imageAttachments.length > 0) {
+        images = imageAttachments.map((a) => {
+          const dataUrl = a.preview!;
+          const commaIdx = dataUrl.indexOf(",");
+          const meta = dataUrl.slice(0, commaIdx);
+          const base64 = dataUrl.slice(commaIdx + 1);
+          const mimeMatch = meta.match(/data:([^;]+)/);
+          const mimeType = mimeMatch?.[1] ?? "image/png";
+          return { type: "image" as const, data: base64, mimeType };
+        });
+      }
 
       const behavior = options?.queueBehavior ?? (agentSession.isStreaming ? "steer" : undefined);
       const sendFn = behavior === "steer"
@@ -91,7 +107,7 @@ export default function SessionScreen() {
           : agentSession.prompt;
 
       try {
-        await sendFn(text);
+        await sendFn(text, images ? { images } : undefined);
       } catch (error) {
         setAlertMessage(
           error instanceof Error ? error.message : "Failed to send prompt",

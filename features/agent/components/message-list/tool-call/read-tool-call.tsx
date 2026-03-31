@@ -5,6 +5,7 @@ import type { ToolCallInfo } from "../../../types";
 import { basename, parseToolArguments } from "../utils";
 import { CodePreview } from "../code-preview";
 import { AnimatedCollapse } from "../animated-collapse";
+import { ToolResultImages } from "./tool-result-images";
 
 interface ReadToolCallProps {
   tc: ToolCallInfo;
@@ -24,7 +25,8 @@ export const ReadToolCall = memo(function ReadToolCall({
   const fileName = basename(filePath);
   const offset = (parsed.offset as number) || 1;
   const content = tc.result || "";
-  const hasContent = !!content;
+  const hasImages = !!(tc.resultImages && tc.resultImages.length > 0);
+  const hasContent = !!content || hasImages;
 
   return (
     <View>
@@ -33,7 +35,8 @@ export const ReadToolCall = memo(function ReadToolCall({
           Read {fileName || filePath || "file"}
         </Text>
       </Pressable>
-      <AnimatedCollapse expanded={expanded && hasContent} maxHeight={300}>
+      {hasImages && <ToolResultImages images={tc.resultImages!} isDark={isDark} />}
+      <AnimatedCollapse expanded={expanded && !!content} maxHeight={300}>
         <View style={styles.previewWrap}>
           <CodePreview code={content} isDark={isDark} startLine={offset} maxHeight={250} />
         </View>

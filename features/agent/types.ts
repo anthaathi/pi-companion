@@ -41,12 +41,18 @@ export interface SubagentMeta {
   turns?: number;
 }
 
+export interface ToolResultImage {
+  data: string;
+  mimeType: string;
+}
+
 export interface ToolCallInfo {
   id: string;
   name: string;
   arguments: string;
   status: "streaming" | "pending" | "running" | "complete" | "error";
   result?: string;
+  resultImages?: ToolResultImage[];
   isError?: boolean;
   partialResult?: string;
   progress?: SubagentProgress;
