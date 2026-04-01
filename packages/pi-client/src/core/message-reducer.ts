@@ -1,5 +1,5 @@
 import type { ChatMessage, ToolCallInfo, ToolResultImage, MessageUsageInfo, AgentMode, PendingExtensionUiRequest, SubagentMeta } from "../types/chat-message";
-import type { AgentStreamEvent, AgentStateData, StreamEventEnvelope } from "../types/stream-events";
+import type { AgentStateData, StreamEventEnvelope } from "../types/stream-events";
 
 export interface SessionState {
   messages: ChatMessage[];
@@ -285,7 +285,7 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
       const current = messages[idx]!;
       let updated = { ...current };
 
-      if (event.message) {
+      if (event.message?.role === "assistant") {
         const msg = event.message;
         const content = Array.isArray(msg.content) ? msg.content : [];
         updated.text = content
@@ -393,6 +393,9 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
     case "message_end": {
       if (event.type !== "message_end") break;
       const endMsg = event.message as unknown as Record<string, unknown> | undefined;
+      if (endMsg?.["role"] !== "assistant") {
+        break;
+      }
       let endIdx = findLastStreamingIndex(messages);
       if (endIdx === -1) {
         for (let i = messages.length - 1; i >= 0; i--) {

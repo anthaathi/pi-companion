@@ -178,11 +178,70 @@ function testMessageEndRebuildsToolCallsFromFullContent() {
   assert.equal(state.messages[0]?.toolCalls?.[1]?.id, 'final-2');
 }
 
+function testToolResultMessageEndDoesNotOverwriteAssistantText() {
+  const state = apply([
+    envelope(1, 'message_start', {
+      type: 'message_start',
+      message: { role: 'assistant', content: [], timestamp: 1 },
+    }),
+    envelope(2, 'message_update', {
+      type: 'message_update',
+      assistantMessageEvent: {
+        type: 'toolcall_start',
+        contentIndex: 0,
+        partial: { id: 'read-1', name: 'read' },
+      },
+    }),
+    envelope(3, 'message_end', {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        stopReason: 'toolUse',
+        timestamp: 3,
+        content: [
+          {
+            type: 'toolCall',
+            id: 'read-1',
+            name: 'read',
+            arguments: { path: 'index.html', offset: 6 },
+          },
+        ],
+      },
+    }),
+    envelope(4, 'tool_execution_end', {
+      type: 'tool_execution_end',
+      toolCallId: 'read-1',
+      toolName: 'read',
+      isError: false,
+      result: {
+        content: [{ type: 'text', text: '<!DOCTYPE html>' }],
+      },
+    }),
+    envelope(5, 'message_end', {
+      type: 'message_end',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'read-1',
+        toolName: 'read',
+        isError: false,
+        timestamp: 5,
+        content: [{ type: 'text', text: '<!DOCTYPE html>' }],
+      },
+    }),
+  ]);
+
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0]?.role, 'assistant');
+  assert.equal(state.messages[0]?.text, '');
+  assert.equal(state.messages[0]?.toolCalls?.[0]?.result, '<!DOCTYPE html>');
+}
+
 function run() {
   testHistorySubagentResult();
   testStreamingPartialResult();
   testParallelToolcallContentIndexRouting();
   testMessageEndRebuildsToolCallsFromFullContent();
+  testToolResultMessageEndDoesNotOverwriteAssistantText();
   console.log('subagent viewer reducer tests passed');
 }
 
