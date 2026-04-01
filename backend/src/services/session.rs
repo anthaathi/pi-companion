@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::models::{PaginatedSessions, SessionDetail, SessionEntry, SessionHeader, SessionListItem, SessionTreeNode};
@@ -200,6 +200,15 @@ pub fn get_session_messages_paginated(
         all_messages.push((entry_id, msg));
     }
 
+    // Stamp turn stats on ALL messages before paginating so
+    // turns that span page boundaries still get stats.
+    let mut all_values: Vec<Value> = all_messages.iter().map(|(_, msg)| msg.clone()).collect();
+    stamp_turn_stats_on_messages(&mut all_values);
+    // Write stamped values back.
+    for (i, val) in all_values.into_iter().enumerate() {
+        all_messages[i].1 = val;
+    }
+
     let end_index = if let Some(before_id) = before_entry_id {
         all_messages.iter().position(|(eid, _)| eid.as_deref() == Some(before_id))
             .unwrap_or(all_messages.len())
@@ -228,61 +237,155 @@ pub fn get_session_messages_paginated(
     })
 }
 
-pub fn get_session_messages_after(
-    base_path: &Path,
-    session_id: &str,
-    last_message_id: Option<&str>,
-) -> Option<Vec<Value>> {
-    let file_path = find_session_file_anywhere(base_path, session_id)?;
-    let content = std::fs::read_to_string(&file_path).ok()?;
+fn is_diff_add_line(line: &str) -> bool {
+    line.starts_with('+') && !line.starts_with("++")
+}
 
-    let mut messages = Vec::new();
-    let mut found_marker = last_message_id.is_none();
+fn is_diff_rm_line(line: &str) -> bool {
+    line.starts_with('-') && !line.starts_with("--")
+}
 
-    for line in content.lines().skip(1) {
-        if line.trim().is_empty() {
+fn stamp_turn_stats_on_messages(messages: &mut [Value]) {
+
+    let mut turn_start_idx: Option<usize> = None;
+
+    let mut i = 0;
+    while i < messages.len() {
+        let role = messages[i].get("role").and_then(|v| v.as_str()).unwrap_or("");
+
+        if role == "user" {
+            turn_start_idx = Some(i);
+            i += 1;
             continue;
         }
 
-        let Ok(val) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
+        let is_final_assistant = role == "assistant"
+            && messages[i].get("stopReason").and_then(|v| v.as_str()) == Some("stop");
 
-        if val.get("type").and_then(|v| v.as_str()) != Some("message") {
-            continue;
-        }
-
-        let Some(message) = val.get("message") else {
-            continue;
-        };
-
-        let entry_id = val.get("id").and_then(|v| v.as_str());
-
-        if !found_marker {
-            let msg_id = message.get("id").and_then(|v| v.as_str())
-                .or_else(|| message.get("messageId").and_then(|v| v.as_str()))
-                .or_else(|| message.get("entryId").and_then(|v| v.as_str()))
-                .or(entry_id);
-
-            if msg_id == last_message_id {
-                found_marker = true;
-            }
+        if !is_final_assistant || turn_start_idx.is_none() {
+            i += 1;
             continue;
         }
 
-        let mut msg = message.clone();
-        if let Some(eid) = entry_id {
-            if let Some(obj) = msg.as_object_mut() {
-                if !obj.contains_key("id") && !obj.contains_key("entryId") {
-                    obj.insert("entryId".to_string(), Value::String(eid.to_string()));
+        let start = turn_start_idx.unwrap();
+        let mut files_edited = HashSet::new();
+        let mut files_created = HashSet::new();
+        let mut lines_added: u32 = 0;
+        let mut lines_removed: u32 = 0;
+
+        for j in start..=i {
+            let msg = &messages[j];
+            let Some(content) = msg.get("content").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for block in content {
+                if block.get("type").and_then(|v| v.as_str()) != Some("toolCall") {
+                    continue;
+                }
+                let tool_name = block.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let args = block.get("arguments");
+                let path_str = extract_path_from_block(block);
+                if path_str.is_empty() {
+                    continue;
+                }
+
+                match tool_name {
+                    "edit" => {
+                        files_edited.insert(path_str);
+                        // Look for diff in toolResult (matched by toolCallId)
+                        let tool_call_id = block.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        for k in start..=i {
+                            let tr = &messages[k];
+                            if tr.get("role").and_then(|v| v.as_str()) != Some("toolResult") {
+                                continue;
+                            }
+                            if tr.get("toolCallId").and_then(|v| v.as_str()) != Some(tool_call_id) {
+                                continue;
+                            }
+                            if let Some(diff) = tr.get("details").and_then(|d| d.get("diff")).and_then(|v| v.as_str()) {
+                                for line in diff.lines() {
+                                    if is_diff_add_line(line) {
+                                        lines_added += 1;
+                                    }
+                                    if is_diff_rm_line(line) {
+                                        lines_removed += 1;
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    "write" => {
+                        files_created.insert(path_str);
+                        let content_str = if let Some(a) = args {
+                            if a.is_object() {
+                                a.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                            } else if let Some(s) = a.as_str() {
+                                serde_json::from_str::<Value>(s)
+                                    .ok()
+                                    .and_then(|v| v.get("content")?.as_str().map(|s| s.to_string()))
+                                    .unwrap_or_default()
+                            } else {
+                                String::new()
+                            }
+                        } else {
+                            String::new()
+                        };
+                        if !content_str.is_empty() {
+                            lines_added += content_str.lines().count() as u32;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
 
-        messages.push(msg);
-    }
+        let start_ts = messages[start].get("timestamp").and_then(|v| v.as_f64()).or_else(|| {
+            messages[start].get("timestamp").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok())
+        });
+        let end_ts = messages[i].get("timestamp").and_then(|v| v.as_f64()).or_else(|| {
+            messages[i].get("timestamp").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok())
+        });
 
-    Some(messages)
+        if let Some(obj) = messages[i].as_object_mut() {
+            if !files_edited.is_empty() || !files_created.is_empty() {
+                obj.insert("turnFileStats".to_string(), serde_json::json!({
+                    "filesEdited": files_edited.len(),
+                    "filesCreated": files_created.len(),
+                    "linesAdded": lines_added,
+                    "linesRemoved": lines_removed,
+                }));
+            }
+
+            if let (Some(s), Some(e)) = (start_ts, end_ts) {
+                let dur = (e - s) as i64;
+                if dur > 0 {
+                    obj.insert("turnDurationMs".to_string(), serde_json::json!(dur));
+                }
+            }
+        }
+
+        turn_start_idx = None;
+        i += 1;
+    }
+}
+
+fn extract_path_from_block(block: &Value) -> String {
+    let args = block.get("arguments");
+    if let Some(a) = args {
+        if a.is_object() {
+            if let Some(p) = a.get("path").and_then(|v| v.as_str()) {
+                return p.to_string();
+            }
+        } else if let Some(s) = a.as_str() {
+            if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+                if let Some(p) = parsed.get("path").and_then(|v| v.as_str()) {
+                    return p.to_string();
+                }
+            }
+        }
+    }
+    String::new()
 }
 
 pub fn get_session_tree(base_path: &Path, cwd: &str, session_id: &str) -> Option<Vec<SessionTreeNode>> {

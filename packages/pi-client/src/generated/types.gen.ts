@@ -449,6 +449,17 @@ export type SessionHeader = {
     version: number;
 };
 
+export type SessionHistoryQuery = {
+    before?: string | null;
+    limit?: number | null;
+};
+
+export type SessionHistoryResponse = {
+    has_more: boolean;
+    messages: Array<unknown>;
+    oldest_entry_id?: string | null;
+};
+
 export type SessionInfo = {
     access_expires_at: string;
     access_token: string;
@@ -480,6 +491,13 @@ export type SessionTreeNode = {
     id: string;
     role?: string | null;
     timestamp: string;
+};
+
+export type SetActiveSessionRequest = {
+    connection_id: string;
+    from_delta_event_id?: number | null;
+    from_event_id?: number | null;
+    session_id?: string | null;
 };
 
 /**
@@ -2634,6 +2652,47 @@ export type UpdateResponses = {
 
 export type UpdateResponse = UpdateResponses[keyof UpdateResponses];
 
+export type SessionHistoryData = {
+    body?: never;
+    path: {
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: {
+        /**
+         * Load messages before this entry ID
+         */
+        before?: string;
+        /**
+         * Max messages to return (default 20)
+         */
+        limit?: number;
+    };
+    url: '/api/sessions/{session_id}/history';
+};
+
+export type SessionHistoryErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Session not found
+     */
+    404: unknown;
+};
+
+export type SessionHistoryResponses = {
+    /**
+     * Paginated session messages
+     */
+    200: SessionHistoryResponse;
+};
+
+export type SessionHistoryResponse2 = SessionHistoryResponses[keyof SessionHistoryResponses];
+
 export type GetSessionModeData = {
     body?: never;
     path: {
@@ -2684,6 +2743,31 @@ export type StreamErrors = {
 export type StreamResponses = {
     /**
      * SSE event stream
+     */
+    200: unknown;
+};
+
+export type SetActiveSessionData = {
+    body: SetActiveSessionRequest;
+    path?: never;
+    query?: never;
+    url: '/api/stream-active-session';
+};
+
+export type SetActiveSessionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Connection not found
+     */
+    404: unknown;
+};
+
+export type SetActiveSessionResponses = {
+    /**
+     * Active session updated
      */
     200: unknown;
 };

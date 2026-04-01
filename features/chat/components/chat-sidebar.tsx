@@ -16,6 +16,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useChatSessions, usePiClient, useIsSessionActive } from '@pi-ui/client';
 import type { SessionListItem } from '@pi-ui/client';
 import { SessionActivityIndicator } from '@/features/workspace/components/session-activity-indicator';
+import { AnimatedListItem } from '@/components/ui/animated-list-item';
 
 interface ChatSidebarProps {
   onNewSession: () => void;
@@ -168,15 +169,16 @@ function SessionList({
   return (
     <Animated.View style={{ opacity: fadeAnim }}>
       {sessions.map((session) => (
-        <SessionItem
-          key={session.id}
-          session={session}
-          isSelected={session.id === selectedSessionId}
-          onSelect={onSelect}
-          textPrimary={textPrimary}
-          textMuted={textMuted}
-          isDark={isDark}
-        />
+        <AnimatedListItem key={session.id}>
+          <SessionItem
+            session={session}
+            isSelected={session.id === selectedSessionId}
+            onSelect={onSelect}
+            textPrimary={textPrimary}
+            textMuted={textMuted}
+            isDark={isDark}
+          />
+        </AnimatedListItem>
       ))}
     </Animated.View>
   );

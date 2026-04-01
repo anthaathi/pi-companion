@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
   titleRow: {
     flexDirection: "row",
@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansMedium,
   },
   diffWrap: {
-    marginTop: 4,
+    marginTop: 8,
     marginLeft: 12,
     borderRadius: 6,
     overflow: "hidden",

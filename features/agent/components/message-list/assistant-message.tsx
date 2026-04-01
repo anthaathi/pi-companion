@@ -50,7 +50,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   const isThinkingOnly = hasThinking && !hasText && !hasToolCalls && isStreaming;
   const isMidTurn = message.stopReason === "toolUse";
   const turnCompleted = !sessionStreaming;
-  const showToolbar = !isStreaming && !isMidTurn && (!!message.text || !!message.errorMessage);
+  const isFinalResponse = message.stopReason === "stop";
+  const showToolbar = !isStreaming && isFinalResponse && (!!message.text || !!message.errorMessage);
 
   const [hovered, setHovered] = useState(false);
   const isWeb = Platform.OS === "web";
@@ -257,7 +258,7 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     paddingVertical: 4,
-    gap: 8,
+    gap: 12,
   },
   textBlock: {},
   errorBlock: {

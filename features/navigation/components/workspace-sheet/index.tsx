@@ -30,6 +30,7 @@ import { usePiClient } from '@pi-ui/client';
 import { requestBrowserNotificationPermission } from '@/features/agent/browser-notifications';
 import { NewWorkspaceDialog } from '@/features/workspace/components/new-workspace-dialog';
 import { SessionActivityIndicator } from '@/features/workspace/components/session-activity-indicator';
+import { AnimatedListItem } from '@/components/ui/animated-list-item';
 
 const SHEET_HEIGHT = 620;
 const TIMING_CONFIG = { duration: 280, easing: Easing.out(Easing.cubic) };
@@ -438,28 +439,29 @@ function SessionPage({ workspaceId, onSessionPress, onDismiss }: SessionPageProp
           </Text>
         ) : (
           sessions.map((session) => (
-            <Pressable
-              key={session.id}
-              onPress={() => onSessionPress(session.id)}
-              style={({ pressed }) => [
-                styles.sessionItem,
-                session.id === selectedSessionId && {
-                  backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                },
-                pressed && { opacity: 0.7 },
-              ]}
-            >
-              <SessionActivityIndicator
-                sessionId={session.id}
-                color={textMuted}
-              />
-              <Text
-                style={[styles.sessionTitle, { color: textPrimary }]}
-                numberOfLines={1}
+            <AnimatedListItem key={session.id}>
+              <Pressable
+                onPress={() => onSessionPress(session.id)}
+                style={({ pressed }) => [
+                  styles.sessionItem,
+                  session.id === selectedSessionId && {
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  },
+                  pressed && { opacity: 0.7 },
+                ]}
               >
-                {session.display_name ?? session.id}
-              </Text>
-            </Pressable>
+                <SessionActivityIndicator
+                  sessionId={session.id}
+                  color={textMuted}
+                />
+                <Text
+                  style={[styles.sessionTitle, { color: textPrimary }]}
+                  numberOfLines={1}
+                >
+                  {session.display_name ?? session.id}
+                </Text>
+              </Pressable>
+            </AnimatedListItem>
           ))
         )}
         {hasNextPage && (

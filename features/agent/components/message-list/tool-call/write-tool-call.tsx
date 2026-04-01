@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
   titleRow: {
     flexDirection: "row",
@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
   },
   previewWrap: {
-    marginTop: 4,
+    marginTop: 8,
     marginLeft: 12,
   },
 

@@ -41,12 +41,18 @@ export interface SubagentMeta {
   turns?: number;
 }
 
+export interface ToolResultImage {
+  data: string;
+  mimeType: string;
+}
+
 export interface ToolCallInfo {
   id: string;
   name: string;
   arguments: string;
   status: "streaming" | "pending" | "running" | "complete" | "error";
   result?: string;
+  resultImages?: ToolResultImage[];
   isError?: boolean;
   partialResult?: string;
   progress?: SubagentProgress;
@@ -70,6 +76,13 @@ export interface MessageUsageInfo {
   currency?: string;
 }
 
+export interface TurnFileStats {
+  filesEdited: number;
+  filesCreated: number;
+  linesAdded: number;
+  linesRemoved: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -85,6 +98,8 @@ export interface ChatMessage {
   responseId?: string;
   usage?: MessageUsageInfo;
   stopReason?: string;
+  turnDurationMs?: number;
+  turnFileStats?: TurnFileStats;
   systemKind?: "bashExecution" | "event";
   command?: string;
   exitCode?: number;

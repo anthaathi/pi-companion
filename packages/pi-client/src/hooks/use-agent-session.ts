@@ -34,6 +34,7 @@ const EMPTY: SessionState = {
   oldestEntryId: null,
   mode: "chat",
   pendingExtensionUiRequest: null,
+  agentState: null,
 };
 
 export function useAgentSession(

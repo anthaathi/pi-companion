@@ -8,6 +8,7 @@ use crate::services::agent::AgentManager;
 use crate::services::desktop::DesktopManager;
 use crate::services::pairing::PairingManager;
 use crate::services::port_scanner::PortScanner;
+use crate::services::sse_registry::SseConnectionRegistry;
 use crate::services::task::TaskManager;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -29,4 +30,5 @@ pub struct AppState {
     pub desktop: DesktopManager,
     pub http_client: reqwest::Client,
     pub instance_id: Arc<String>,
+    pub sse_registry: SseConnectionRegistry,
 }

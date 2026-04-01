@@ -87,7 +87,7 @@ function SingleToolCall({ tc, isDark, turnCompleted }: { tc: ToolCallInfo; isDar
     case "bash":
       return <BashToolCall tc={tc} isDark={isDark} turnCompleted={turnCompleted} />;
     case "read":
-      return <ReadToolCall tc={tc} isDark={isDark} />;
+      return <ReadToolCall tc={tc} isDark={isDark} turnCompleted={turnCompleted} />;
     case "write":
       return <WriteToolCall tc={tc} isDark={isDark} turnCompleted={turnCompleted} />;
     case "edit":
@@ -95,9 +95,9 @@ function SingleToolCall({ tc, isDark, turnCompleted }: { tc: ToolCallInfo; isDar
     case "download":
       return <DownloadToolCall tc={tc} isDark={isDark} />;
     case "subagent":
-      return <SubagentToolCall tc={tc} isDark={isDark} />;
+      return <SubagentToolCall tc={tc} isDark={isDark} turnCompleted={turnCompleted} />;
     default:
-      return <GenericToolCall tc={tc} isDark={isDark} />;
+      return <GenericToolCall tc={tc} isDark={isDark} turnCompleted={turnCompleted} />;
   }
 }
 
@@ -233,13 +233,12 @@ const GroupedToolCalls = memo(function GroupedToolCalls({
 
 const styles = StyleSheet.create({
   container: {
-    gap: 8,
+    gap: 12,
   },
   groupHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingVertical: 3,
   },
   labelRow: {
     flexDirection: "row",

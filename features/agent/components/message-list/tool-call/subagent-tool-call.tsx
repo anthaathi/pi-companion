@@ -10,6 +10,7 @@ import { AnimatedCollapse } from "../animated-collapse";
 interface SubagentToolCallProps {
   tc: ToolCallInfo;
   isDark: boolean;
+  turnCompleted?: boolean;
 }
 
 const DETAIL_MAX_HEIGHT = 340;
@@ -17,16 +18,27 @@ const DETAIL_MAX_HEIGHT = 340;
 export const SubagentToolCall = memo(function SubagentToolCall({
   tc,
   isDark,
+  turnCompleted = false,
 }: SubagentToolCallProps) {
   const colors = isDark ? Colors.dark : Colors.light;
   const active = isToolActive(tc);
   const hasResult = !!tc.result;
-  const [expanded, setExpanded] = useState(active || hasResult);
+  const [expanded, setExpanded] = useState(() => active || (!turnCompleted && hasResult));
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
-    if (active || hasResult) setExpanded(true);
-  }, [active, hasResult]);
+    if (active) setExpanded(true);
+  }, [active]);
+
+  const prevTurnCompleted = useRef(turnCompleted);
+  useEffect(() => {
+    const justCompleted = turnCompleted && !prevTurnCompleted.current;
+    prevTurnCompleted.current = turnCompleted;
+    if (justCompleted && !active) {
+      const timer = setTimeout(() => setExpanded(false), 400);
+      return () => clearTimeout(timer);
+    }
+  }, [turnCompleted, active]);
 
   const transcript = tc.result || tc.partialResult || "";
   const parsed = parseToolArguments(tc.arguments);
@@ -144,7 +156,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 6,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
   headerText: {
     flex: 1,
@@ -174,7 +186,7 @@ const styles = StyleSheet.create({
   detailBox: {
     borderRadius: 8,
     padding: 10,
-    marginTop: 4,
+    marginTop: 8,
     marginLeft: 12,
   },
   section: {

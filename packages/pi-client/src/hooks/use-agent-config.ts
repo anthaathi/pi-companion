@@ -28,7 +28,6 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef(sessionId);
 
-  // Track sessionId changes to cancel stale retries
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
@@ -40,20 +39,32 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
     }
   }, []);
 
-  const load = useCallback(
+  // Subscribe to agent_state from SSE
+  useEffect(() => {
+    if (!sessionId) {
+      setState(null);
+      return;
+    }
+
+    const sub = client.agentState$(sessionId).subscribe((agentState) => {
+      if (agentState && sessionIdRef.current === sessionId) {
+        setState(agentState);
+      }
+    });
+
+    return () => sub.unsubscribe();
+  }, [client, sessionId]);
+
+  // Fetch available models via REST (still needed, not in SSE)
+  const loadModels = useCallback(
     async (attempt = 0) => {
       if (!sessionId) return;
       setIsLoading(true);
       setError(null);
 
       try {
-        const [stateResult, modelsResult] = await Promise.all([
-          client.api.getState(sessionId),
-          client.api.getAvailableModels(sessionId),
-        ]);
-        // Ignore result if sessionId changed while request was in flight
+        const modelsResult = await client.api.getAvailableModels(sessionId);
         if (sessionIdRef.current !== sessionId) return;
-        setState(stateResult as unknown as AgentStateData);
         setModels((modelsResult.models ?? []) as unknown as ModelInfo[]);
         attemptRef.current = 0;
         setIsLoading(false);
@@ -65,12 +76,12 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
           attemptRef.current = nextAttempt;
           retryTimerRef.current = setTimeout(() => {
             if (sessionIdRef.current === sessionId) {
-              load(nextAttempt);
+              loadModels(nextAttempt);
             }
           }, RETRY_DELAY_MS);
         } else {
           const message =
-            err instanceof Error ? err.message : "Failed to load toolbar configuration";
+            err instanceof Error ? err.message : "Failed to load available models";
           setError(message);
           setIsLoading(false);
           attemptRef.current = 0;
@@ -81,23 +92,22 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
   );
 
   useEffect(() => {
-    // Reset state when sessionId changes
     clearRetryTimer();
     attemptRef.current = 0;
     setError(null);
-    load();
+    loadModels();
 
     return () => {
       clearRetryTimer();
     };
-  }, [load, clearRetryTimer]);
+  }, [loadModels, clearRetryTimer]);
 
   const retry = useCallback(() => {
     clearRetryTimer();
     attemptRef.current = 0;
     setError(null);
-    load(0);
-  }, [load, clearRetryTimer]);
+    loadModels(0);
+  }, [loadModels, clearRetryTimer]);
 
   const setModel = useCallback(
     async (params: { provider: string; modelId: string }) => {
@@ -126,10 +136,10 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
       try {
         await client.setModel(sessionId, params);
       } catch {
-        load();
+        loadModels();
       }
     },
-    [client, sessionId, load, models],
+    [client, sessionId, loadModels, models],
   );
 
   const setThinkingLevel = useCallback(
@@ -148,10 +158,10 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
       try {
         await client.setThinkingLevel(sessionId, level);
       } catch {
-        load();
+        loadModels();
       }
     },
-    [client, sessionId, load],
+    [client, sessionId, loadModels],
   );
 
   const setMode = useCallback(
@@ -170,10 +180,10 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
       try {
         await client.prompt(sessionId, mode === "plan" ? "/plan" : "/chat");
       } catch {
-        load();
+        loadModels();
       }
     },
-    [client, sessionId, load],
+    [client, sessionId, loadModels],
   );
 
   return {
@@ -184,7 +194,7 @@ export function useAgentConfig(sessionId: string | null): AgentConfigHandle {
     setModel,
     setThinkingLevel,
     setMode,
-    reload: load,
+    reload: loadModels,
     retry,
   };
 }

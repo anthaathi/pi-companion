@@ -4,6 +4,7 @@ import { Colors, Fonts } from "@/constants/theme";
 import type { ToolCallInfo } from "../../../types";
 import { isToolActive, parseToolArguments, truncateOutput } from "../utils";
 import { AnimatedCollapse } from "../animated-collapse";
+import { ToolResultImages } from "./tool-result-images";
 
 interface BashToolCallProps {
   tc: ToolCallInfo;
@@ -82,6 +83,9 @@ export const BashToolCall = memo(function BashToolCall({
           </ScrollView>
         </View>
       </AnimatedCollapse>
+      {tc.resultImages && tc.resultImages.length > 0 && (
+        <ToolResultImages images={tc.resultImages} isDark={isDark} />
+      )}
     </View>
   );
 });
@@ -91,7 +95,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
   ranLabel: {
     fontSize: 12,
@@ -105,7 +109,7 @@ const styles = StyleSheet.create({
   terminal: {
     borderRadius: 6,
     padding: 10,
-    marginTop: 4,
+    marginTop: 8,
     marginLeft: 12,
   },
   promptLine: {

@@ -564,7 +564,7 @@ function reduceStreamEvents(
         const lastMsg = { ...msgs[lastIdx] };
         msgs[lastIdx] = lastMsg;
 
-        if (piEvent.message) {
+        if (piEvent.message?.role === "assistant") {
           const msg = piEvent.message;
           const content = Array.isArray(msg.content) ? msg.content : [];
           lastMsg.text = content
@@ -663,6 +663,9 @@ function reduceStreamEvents(
       }
 
       case "message_end": {
+        if (piEvent.message?.role !== "assistant") {
+          break;
+        }
         const lastIdx = msgs.findLastIndex(
           (m) => m.role === "assistant" && m.isStreaming,
         );

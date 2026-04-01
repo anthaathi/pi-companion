@@ -146,7 +146,12 @@ fn agent_routes() -> Router<AppState> {
             "/agent/sessions/{session_id}/preview/{hostname}/{port}/{*path}",
             any(routes::agent::preview_proxy_path),
         )
+        .route(
+            "/sessions/{session_id}/history",
+            get(routes::agent::session_history),
+        )
         .route("/stream", get(routes::agent::stream))
+        .route("/stream-active-session", post(routes::agent::set_active_session))
         .route("/ws/stream", get(routes::agent::ws_stream))
         .route("/stream/{session_id}", get(routes::agent::session_stream))
         .route("/ws/stream/{session_id}", get(routes::agent::ws_session_stream))

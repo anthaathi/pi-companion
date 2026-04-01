@@ -18,6 +18,7 @@ import { useWorkspaceSessions as useSessions, usePiClient, useIsSessionActive } 
 import type { SessionListItem } from '@pi-ui/client';
 import { requestBrowserNotificationPermission } from "@/features/agent/browser-notifications";
 import { SessionActivityIndicator } from "@/features/workspace/components/session-activity-indicator";
+import { AnimatedListItem } from "@/components/ui/animated-list-item";
 
 export function SessionSidebar() {
   const colorScheme = useColorScheme() ?? "light";
@@ -192,15 +193,16 @@ function SessionList({
   return (
     <Animated.View style={{ opacity: fadeAnim }}>
       {sessions.map((session) => (
-        <SessionItem
-          key={session.id}
-          session={session}
-          workspaceId={workspaceId}
-          isSelected={session.id === selectedSessionId}
-          textPrimary={textPrimary}
-          textMuted={textMuted}
-          isDark={isDark}
-        />
+        <AnimatedListItem key={session.id}>
+          <SessionItem
+            session={session}
+            workspaceId={workspaceId}
+            isSelected={session.id === selectedSessionId}
+            textPrimary={textPrimary}
+            textMuted={textMuted}
+            isDark={isDark}
+          />
+        </AnimatedListItem>
       ))}
     </Animated.View>
   );

@@ -167,16 +167,30 @@ pub struct WsStreamQuery {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct SessionStreamQuery {
-    pub last_message_id: Option<String>,
+pub struct SessionStreamQuery {}
+
+#[derive(Debug, Deserialize)]
+pub struct WsSessionStreamQuery {
+    pub access_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SetActiveSessionRequest {
+    pub connection_id: String,
+    pub session_id: Option<String>,
+    pub from_event_id: Option<u64>,
+    pub from_delta_event_id: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SessionHistoryQuery {
     pub before: Option<String>,
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct WsSessionStreamQuery {
-    pub last_message_id: Option<String>,
-    pub before: Option<String>,
-    pub limit: Option<u32>,
-    pub access_token: Option<String>,
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SessionHistoryResponse {
+    pub messages: Vec<Value>,
+    pub has_more: bool,
+    pub oldest_entry_id: Option<String>,
 }

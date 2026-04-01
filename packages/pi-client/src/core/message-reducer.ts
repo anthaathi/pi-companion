@@ -1,5 +1,5 @@
-import type { ChatMessage, ToolCallInfo, MessageUsageInfo, AgentMode, PendingExtensionUiRequest, SubagentMeta } from "../types/chat-message";
-import type { AgentStreamEvent, StreamEventEnvelope } from "../types/stream-events";
+import type { ChatMessage, ToolCallInfo, ToolResultImage, MessageUsageInfo, AgentMode, PendingExtensionUiRequest, SubagentMeta } from "../types/chat-message";
+import type { AgentStateData, StreamEventEnvelope } from "../types/stream-events";
 
 export interface SessionState {
   messages: ChatMessage[];
@@ -11,6 +11,7 @@ export interface SessionState {
   oldestEntryId: string | null;
   mode: AgentMode;
   pendingExtensionUiRequest: PendingExtensionUiRequest | null;
+  agentState: AgentStateData | null;
 }
 
 export function createEmptySessionState(): SessionState {
@@ -18,6 +19,7 @@ export function createEmptySessionState(): SessionState {
     messages: [],
     isStreaming: false,
     isReady: false,
+    agentState: null,
     isLoading: false,
     isLoadingOlderMessages: false,
     hasMoreMessages: false,
@@ -37,6 +39,21 @@ function extractTextFromContent(content: unknown[] | undefined): string {
     .join("");
 }
 
+function extractImagesFromContent(content: unknown[] | undefined): ToolResultImage[] | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const images = content
+    .filter((c): c is { type: string; data: string; mimeType: string } =>
+      typeof c === "object" &&
+      c !== null &&
+      "type" in c &&
+      (c as { type: string }).type === "image" &&
+      "data" in c &&
+      typeof (c as { data: unknown }).data === "string",
+    )
+    .map((c) => ({ data: c.data, mimeType: c.mimeType ?? "image/png" }));
+  return images.length > 0 ? images : undefined;
+}
+
 function extractMessageEntryId(msg: Record<string, unknown>): string | undefined {
   const rawId = msg["entryId"] ?? msg["entry_id"] ?? msg["id"] ?? msg["messageId"];
   if (typeof rawId === "string" && rawId.trim()) return rawId;
@@ -54,6 +71,30 @@ const CLEAR_PENDING_EVENTS = new Set([
   "tool_execution_start", "tool_execution_update", "tool_execution_end",
   "turn_end", "agent_end", "session_process_exited",
 ]);
+
+function stampTurnEndFromBackend(
+  messages: ChatMessage[],
+  stats: { filesEdited?: number; filesCreated?: number; linesAdded?: number; linesRemoved?: number; durationMs?: number },
+): ChatMessage[] {
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role === "assistant") { lastAssistantIdx = i; break; }
+  }
+  if (lastAssistantIdx === -1) return messages;
+  const msg = messages[lastAssistantIdx]!;
+  if (msg.turnDurationMs !== undefined) return messages;
+
+  const hasFileStats = (stats.filesEdited ?? 0) > 0 || (stats.filesCreated ?? 0) > 0;
+  const next = [...messages];
+  next[lastAssistantIdx] = {
+    ...msg,
+    turnDurationMs: stats.durationMs ?? 0,
+    turnFileStats: hasFileStats
+      ? { filesEdited: stats.filesEdited ?? 0, filesCreated: stats.filesCreated ?? 0, linesAdded: stats.linesAdded ?? 0, linesRemoved: stats.linesRemoved ?? 0 }
+      : undefined,
+  };
+  return next;
+}
 
 function findLastStreamingIndex(messages: ChatMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -143,7 +184,7 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
   const event = envelope.data;
   const eventType = envelope.type;
 
-  let { messages, isStreaming, mode, pendingExtensionUiRequest } = state;
+  let { messages, isStreaming, mode, pendingExtensionUiRequest, agentState } = state;
 
   if (CLEAR_PENDING_EVENTS.has(eventType)) {
     pendingExtensionUiRequest = null;
@@ -173,8 +214,24 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
       break;
     }
 
+    case "turn_end": {
+      break;
+    }
+
     case "agent_end": {
       isStreaming = false;
+      let lastAssist: ChatMessage | undefined;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i]!.role === "assistant") { lastAssist = messages[i]; break; }
+      }
+      if (lastAssist?.stopReason === "stop") {
+        const raw = (event as unknown as Record<string, unknown>)["turnStats"] as
+          | { filesEdited?: number; filesCreated?: number; linesAdded?: number; linesRemoved?: number; durationMs?: number }
+          | undefined;
+        if (raw) {
+          messages = stampTurnEndFromBackend(messages, raw);
+        }
+      }
       messages = updateLastStreaming(messages, (msg) => ({ ...msg, isStreaming: false }));
       break;
     }
@@ -213,11 +270,6 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
       if (event.type !== "message_update") break;
       let idx = findLastStreamingIndex(messages);
       if (idx === -1) {
-        for (let j = messages.length - 1; j >= 0; j--) {
-          if (messages[j]!.role === "assistant") { idx = j; break; }
-        }
-      }
-      if (idx === -1) {
         messages = [...messages, {
           id: `assistant-${envelope.id}`,
           role: "assistant" as const,
@@ -233,7 +285,7 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
       const current = messages[idx]!;
       let updated = { ...current };
 
-      if (event.message) {
+      if (event.message?.role === "assistant") {
         const msg = event.message;
         const content = Array.isArray(msg.content) ? msg.content : [];
         updated.text = content
@@ -341,7 +393,17 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
     case "message_end": {
       if (event.type !== "message_end") break;
       const endMsg = event.message as unknown as Record<string, unknown> | undefined;
-      messages = updateLastStreaming(messages, (msg) => {
+      if (endMsg?.["role"] !== "assistant") {
+        break;
+      }
+      let endIdx = findLastStreamingIndex(messages);
+      if (endIdx === -1) {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i]!.role === "assistant") { endIdx = i; break; }
+        }
+      }
+      if (endIdx !== -1) {
+        const msg = messages[endIdx]!;
         const updated: ChatMessage = {
           ...msg,
           isStreaming: false,
@@ -362,8 +424,10 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
           const toolCalls = buildToolCallsFromContent(content, msg.toolCalls, "pending");
           if (toolCalls.length > 0) updated.toolCalls = toolCalls;
         }
-        return updated;
-      });
+        const next = [...messages];
+        next[endIdx] = updated;
+        messages = next;
+      }
       break;
     }
 
@@ -395,6 +459,9 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
       const resultText = event.result
         ? extractTextFromContent(event.result.content as unknown[])
         : undefined;
+      const resultImages = event.result
+        ? extractImagesFromContent(event.result.content as unknown[])
+        : undefined;
       const resultDetails = (event.result as any)?.details;
       const subagentMeta = resultDetails ? extractSubagentMeta(resultDetails) : undefined;
       const diff = resultDetails && typeof resultDetails.diff === "string" ? resultDetails.diff : undefined;
@@ -402,6 +469,7 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
         ...tc,
         status: event.isError ? "error" : "complete",
         result: resultText,
+        resultImages,
         isError: event.isError,
         ...(subagentMeta ? { subagentMeta } : {}),
         ...(diff ? { diff } : {}),
@@ -427,12 +495,7 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
     }
 
     case "agent_state": {
-      // agent_state is emitted on session touch/create with full session state
-      // from the backend. It carries isStreaming, mode, model info, etc.
-      const data = event as unknown as {
-        isStreaming?: boolean;
-        mode?: string;
-      };
+      const data = event as unknown as AgentStateData;
       if (typeof data.isStreaming === "boolean") {
         isStreaming = data.isStreaming;
         if (!isStreaming) {
@@ -444,6 +507,7 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
           mode = data.mode;
         }
       }
+      agentState = data;
       break;
     }
 
@@ -470,7 +534,7 @@ export function reduceStreamEvent(state: SessionState, envelope: StreamEventEnve
     }
   }
 
-  return { ...state, messages, isStreaming, mode, pendingExtensionUiRequest };
+  return { ...state, messages, isStreaming, mode, pendingExtensionUiRequest, agentState };
 }
 
 function updateToolCall(
@@ -563,6 +627,9 @@ function convertSingleMessage(msg: Record<string, unknown>, index: number): Chat
     const thinking = content.filter(c => c["type"] === "thinking").map(c => c["thinking"] as string ?? "").join("");
     const toolCalls = buildToolCallsFromContent(content, undefined, "complete");
 
+    const backendStats = msg["turnFileStats"] as Record<string, number> | undefined;
+    const backendDuration = typeof msg["turnDurationMs"] === "number" ? msg["turnDurationMs"] as number : undefined;
+
     return {
       id: stableId(msg, "assistant", index),
       entryId: extractMessageEntryId(msg),
@@ -578,6 +645,13 @@ function convertSingleMessage(msg: Record<string, unknown>, index: number): Chat
       responseId: msg["responseId"] as string | undefined,
       usage: extractUsage(msg),
       stopReason: msg["stopReason"] as ChatMessage["stopReason"],
+      turnDurationMs: backendDuration,
+      turnFileStats: backendStats ? {
+        filesEdited: backendStats["filesEdited"] ?? 0,
+        filesCreated: backendStats["filesCreated"] ?? 0,
+        linesAdded: backendStats["linesAdded"] ?? 0,
+        linesRemoved: backendStats["linesRemoved"] ?? 0,
+      } : undefined,
     };
   }
 
@@ -619,6 +693,7 @@ export function convertRawMessages(rawMessages: Record<string, string>[]): ChatM
         );
         if (!tc) continue;
         tc.result = extractTextFromContent(raw["content"] as unknown[] | undefined);
+        tc.resultImages = extractImagesFromContent(raw["content"] as unknown[] | undefined);
         tc.isError = raw["isError"] as boolean;
         tc.status = raw["isError"] ? "error" : "complete";
         const details = raw["details"] as Record<string, unknown> | undefined;

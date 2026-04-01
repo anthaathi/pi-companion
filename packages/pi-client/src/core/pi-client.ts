@@ -1,10 +1,9 @@
-import { BehaviorSubject, Subject, Observable, filter, map, distinctUntilChanged, take } from "rxjs";
+import { BehaviorSubject, Subject, Observable, filter, map, distinctUntilChanged } from "rxjs";
 import type { ConnectionState, PiClientConfig, SessionListItem } from "../types";
-import type { StreamEventEnvelope, ImageContent } from "../types/stream-events";
+import type { StreamEventEnvelope, ImageContent, AgentStateData } from "../types/stream-events";
 import type { ChatMessage, AgentMode, PendingExtensionUiRequest } from "../types/chat-message";
 import { ApiClient } from "./api-client";
 import { StreamConnection } from "./stream-connection";
-import { SessionStreamConnection } from "./session-stream-connection";
 import { reduceStreamEvent, createEmptySessionState, convertRawMessages, type SessionState } from "./message-reducer";
 
 export interface SessionListState {
@@ -21,8 +20,6 @@ export class PiClient {
   private readonly _stream: StreamConnection;
   private readonly _sessionStates = new Map<string, BehaviorSubject<SessionState>>();
   private readonly _sessionListStates = new Map<string, BehaviorSubject<SessionListState>>();
-  private readonly _sessionStreams = new Map<string, SessionStreamConnection>();
-  private readonly _staleSessionIds = new Set<string>();
   private readonly _activeSessionIds$ = new BehaviorSubject<Set<string>>(new Set());
   private readonly _config: PiClientConfig;
   private readonly _serverRestart$ = new Subject<void>();
@@ -30,12 +27,9 @@ export class PiClient {
   private _instanceId: string | null = null;
   private _activeSessionIds = new Set<string>();
   private _viewedSessionId: string | null = null;
-
-  /**
-   * Tracks the highest event id processed per session to deduplicate events
-   * that arrive on both the global stream and the session stream.
-   */
+  private _pendingActiveSession: string | null | undefined = undefined;
   private readonly _highWaterMarks = new Map<string, number>();
+  private readonly _deltaHighWaterMarks = new Map<string, number>();
 
   constructor(config: PiClientConfig) {
     this._config = config;
@@ -52,12 +46,25 @@ export class PiClient {
     });
 
     this._stream.events$.subscribe((envelope) => {
-      if (__DEV__) console.log("[pi:global]", envelope.type, envelope.session_id, envelope.id, envelope.data);
-      this._processGlobalEvent(envelope);
+      if (__DEV__) console.log("[pi:stream]", envelope.type, envelope.session_id, envelope.id);
+      this._processEvent(envelope);
     });
 
     this._stream.instanceId$.subscribe((instanceId) => {
       this._handleInstanceId(instanceId);
+    });
+
+    this._stream.connectionId$.subscribe(() => {
+      const sessionId = this._pendingActiveSession !== undefined
+        ? this._pendingActiveSession
+        : this._viewedSessionId;
+      this._pendingActiveSession = undefined;
+
+      if (sessionId) {
+        this._fetchAndApplyHistory(sessionId).then(() => {
+          this._sendActiveSession(sessionId);
+        });
+      }
     });
 
     this._stream.activeSessions$.subscribe((sessionIds) => {
@@ -79,23 +86,11 @@ export class PiClient {
   }
 
   disconnect(): void {
-    for (const stream of this._sessionStreams.values()) {
-      stream.destroy();
-    }
-    this._sessionStreams.clear();
     this._stream.disconnect();
   }
 
   reconnect(): void {
     this._stream.reconnect();
-    if (!this._viewedSessionId) return;
-    const sessionStream = this._sessionStreams.get(this._viewedSessionId);
-    if (sessionStream) {
-      if (__DEV__) console.log("[pi:session]", "reconnect (explicit, full reload)", this._viewedSessionId);
-      sessionStream.connect(this._viewedSessionId);
-      return;
-    }
-    this._ensureSessionStream(this._viewedSessionId);
   }
 
   get serverRestart$(): Observable<void> {
@@ -117,11 +112,6 @@ export class PiClient {
   updateToken(accessToken: string): void {
     (this._config as { accessToken: string }).accessToken = accessToken;
     this.api.updateToken(accessToken);
-    for (const stream of this._sessionStreams.values()) {
-      if (stream.stateSnapshot.status === "disconnected") {
-        stream.reconnect();
-      }
-    }
   }
 
   get events$(): Observable<StreamEventEnvelope> {
@@ -140,18 +130,11 @@ export class PiClient {
     sessionId: string,
     params: { workspaceId?: string; sessionFile: string },
   ): Promise<void> {
-    // Close previous session stream if switching sessions
-    if (this._viewedSessionId && this._viewedSessionId !== sessionId) {
-      const prev = this._viewedSessionId;
-      if (__DEV__) console.log("[pi:session]", "auto-close previous", prev);
-      this._closeSessionStream(prev);
-    }
     this._viewedSessionId = sessionId;
 
     const subject = this._getOrCreateSessionSubject(sessionId);
     const current = subject.getValue();
 
-    // Touch the session on the backend (register it as active)
     const touch = async () => {
       if (params.workspaceId) {
         await this.api.touchAgentSession(sessionId, {
@@ -164,55 +147,29 @@ export class PiClient {
     };
 
     if (current.isReady) {
-      // Session was already open — just re-touch and ensure stream is connected.
-      // Always do a full history reload to avoid stale cache.
-      try { await touch(); } catch { /* keep going */ }
-      this._ensureSessionStream(sessionId);
+      touch().catch(() => {});
+      await this._fetchAndApplyHistory(sessionId);
+      this._setActiveSessionOnBackend(sessionId);
       return;
     }
 
-    // First open — show loading state
     subject.next({ ...current, isLoading: true });
 
     try { await touch(); } catch {
-      subject.next({ ...current, isLoading: false });
+      await this._fetchAndApplyHistory(sessionId);
+      this._setActiveSessionOnBackend(sessionId);
       return;
     }
 
-    // Connect the session stream. isReady will be set by _onSessionHistoryDone
-    // once history + buffered events have been fully received.
-    const sessionStream = this._getOrCreateSessionStream(sessionId);
-    sessionStream.connect(sessionId);
-
-    // Fetch pending extension UI request in parallel
-    try {
-      const state = await this.api.getState(sessionId);
-      const pending = (state as Record<string, unknown>)["pendingExtensionUiRequest"];
-      if (pending && typeof pending === "object" && "id" in pending && "method" in pending) {
-        const latest = subject.getValue();
-        subject.next({
-          ...latest,
-          pendingExtensionUiRequest: pending as PendingExtensionUiRequest,
-        });
-      }
-    } catch {
-      // state fetch failed — non-critical
-    }
+    await this._fetchAndApplyHistory(sessionId);
+    this._setActiveSessionOnBackend(sessionId);
   }
 
   closeSession(sessionId: string): void {
     if (__DEV__) console.log("[pi:close]", sessionId);
     if (this._viewedSessionId === sessionId) {
       this._viewedSessionId = null;
-    }
-    this._closeSessionStream(sessionId);
-  }
-
-  private _closeSessionStream(sessionId: string): void {
-    const stream = this._sessionStreams.get(sessionId);
-    if (stream) {
-      if (__DEV__) console.log("[pi:close]", "disconnecting stream", sessionId, stream.stateSnapshot.status);
-      stream.disconnect();
+      this._setActiveSessionOnBackend(null);
     }
   }
 
@@ -240,6 +197,10 @@ export class PiClient {
     return this.session$(sessionId).pipe(map((s) => s.pendingExtensionUiRequest), distinctUntilChanged());
   }
 
+  agentState$(sessionId: string): Observable<AgentStateData | null> {
+    return this.session$(sessionId).pipe(map((s) => s.agentState), distinctUntilChanged());
+  }
+
   getSessionSnapshot(sessionId: string): SessionState {
     return this._getOrCreateSessionSubject(sessionId).getValue();
   }
@@ -252,7 +213,7 @@ export class PiClient {
   // Load older messages (pagination)
   // ---------------------------------------------------------------------------
 
-  async loadOlderMessages(sessionId: string, limit = 20): Promise<void> {
+  async loadOlderMessages(sessionId: string, limit = 50): Promise<void> {
     const subject = this._getOrCreateSessionSubject(sessionId);
     const current = subject.getValue();
     if (!current.hasMoreMessages || current.isLoadingOlderMessages) return;
@@ -260,40 +221,31 @@ export class PiClient {
     subject.next({ ...current, isLoadingOlderMessages: true });
 
     try {
-      const temp = new SessionStreamConnection({
-        serverUrl: this._config.serverUrl,
-        getAccessToken: () => this._config.accessToken,
+      const result = await this.api.getSessionHistory(sessionId, {
+        before: current.oldestEntryId ?? undefined,
+        limit,
       });
 
-      const result = await new Promise<StreamEventEnvelope[]>((resolve) => {
-        const collected: StreamEventEnvelope[] = [];
-
-        const timeout = setTimeout(() => {
-          temp.destroy();
-          resolve(collected);
-        }, 10_000);
-
-        // Collect ALL history events until history_done
-        temp.historyEvents$.subscribe((envelope) => {
-          collected.push(envelope);
+      const rawMessages = result.messages as Record<string, string>[];
+      if (rawMessages.length > 0) {
+        const converted = convertRawMessages(rawMessages);
+        const latest = subject.getValue();
+        const existingKeys = new Set(latest.messages.map((m) => m.entryId).filter(Boolean));
+        const unique = converted.filter((m) => !m.entryId || !existingKeys.has(m.entryId));
+        subject.next({
+          ...latest,
+          messages: [...unique, ...latest.messages],
+          hasMoreMessages: result.has_more,
+          oldestEntryId: result.oldest_entry_id ?? null,
+          isLoadingOlderMessages: false,
         });
-
-        temp.historyDone$.pipe(take(1)).subscribe(() => {
-          clearTimeout(timeout);
-          temp.destroy();
-          resolve(collected);
-        });
-
-        temp.connect(sessionId, undefined, current.oldestEntryId ?? undefined, limit, false);
-      });
-
-      if (result.length > 0) {
-        // Process all collected history events
-        for (const envelope of result) {
-          this._processHistoryEvent(sessionId, envelope, true);
-        }
       } else {
-        subject.next({ ...subject.getValue(), isLoadingOlderMessages: false });
+        subject.next({
+          ...subject.getValue(),
+          hasMoreMessages: result.has_more,
+          oldestEntryId: result.oldest_entry_id ?? null,
+          isLoadingOlderMessages: false,
+        });
       }
     } catch {
       subject.next({ ...subject.getValue(), isLoadingOlderMessages: false });
@@ -459,101 +411,24 @@ export class PiClient {
   }
 
   // ---------------------------------------------------------------------------
-  // Internal — event processing
+  // Internal — event processing (single unified stream)
   // ---------------------------------------------------------------------------
 
   private _knownStreamSessionIds = new Set<string>();
 
-  /**
-   * Event types that the per-session stream (`/api/stream/{id}`) delivers.
-   * These are filtered by `is_session_only_event` on the backend.
-   * Everything else (status events) only comes via the global stream.
-   */
-  private static readonly _SESSION_ONLY_EVENTS = new Set([
-    "message_start",
-    "message_update",
-    "message_end",
-    "tool_execution_start",
-    "tool_execution_update",
-    "tool_execution_end",
-    "turn_start",
-    "auto_compaction_start",
-    "auto_compaction_end",
-    "auto_retry_start",
-    "auto_retry_end",
-  ]);
+  private _processEvent(envelope: StreamEventEnvelope): void {
+    if (envelope.type === "history_messages") return;
 
-  /**
-   * Process an event from the GLOBAL stream (`/api/stream`).
-   *
-   * The backend delivers two categories of events:
-   *
-   * SESSION_ONLY events (message_*, tool_execution_*, turn_start, etc.)
-   *   → Delivered by BOTH global stream and session stream
-   *   → When session stream is active, skip here (session stream handles them
-   *     including buffered events from the current turn)
-   *
-   * STATUS events (agent_state, session_state, agent_start, agent_end, etc.)
-   *   → Delivered ONLY by global stream (backend filters them from session stream)
-   *   → Always process here
-   *   → Do NOT advance highWaterMark (would block session stream buffered events)
-   */
-  private _processGlobalEvent(envelope: StreamEventEnvelope): void {
     const sessionId = envelope.session_id;
 
-    if (PiClient._SESSION_ONLY_EVENTS.has(envelope.type)) {
-      // Session stream handles these (including buffered events from current turn)
-      if (this._isSessionStreamConnectedOrLoading(sessionId)) {
-        return;
-      }
-      // No session stream — process normally with hwm tracking
-      this._applyLiveEvent(sessionId, envelope, true);
-      return;
-    }
-
-    // Status event — only comes from global stream.
-    // Apply to reducer but do NOT advance hwm. If we advanced hwm here,
-    // a status event with id=151 would cause session stream buffered events
-    // (id=100-150) to be skipped as "already processed".
-    if (envelope.type === "agent_end" && !this._isSessionStreamConnectedOrLoading(sessionId)) {
-      this._staleSessionIds.add(sessionId);
-    }
-
-    this._applyLiveEvent(sessionId, envelope, false);
-  }
-
-  /**
-   * Process an event from the per-session stream (after history_done).
-   * These are buffered events + live events. Always advances hwm.
-   */
-  private _processSessionEvent(sessionId: string, envelope: StreamEventEnvelope): void {
-    if (__DEV__) console.log("[pi:sess-live]", sessionId, envelope.type, envelope.id, envelope.data);
-    this._applyLiveEvent(sessionId, envelope, true);
-  }
-
-  /**
-   * Apply a live (non-history) event to session state.
-   *
-   * @param updateHwm - If true, advance the high-water-mark. Session stream
-   *   events always advance it. Global stream status events must NOT advance
-   *   it because their IDs can be higher than buffered events that haven't
-   *   arrived yet from the session stream.
-   */
-  private _applyLiveEvent(sessionId: string, envelope: StreamEventEnvelope, updateHwm: boolean): void {
-    if (envelope.type === "history_messages") {
-      this._processHistoryEvent(sessionId, envelope);
-      return;
-    }
-
-    // Deduplicate by event id
     if (envelope.id > 0) {
       const hwm = this._highWaterMarks.get(sessionId) ?? 0;
       if (envelope.id <= hwm) {
-        if (__DEV__) console.log("[pi:dedupe]", "skip", sessionId, envelope.type, envelope.id, "<=", hwm);
         return;
       }
-      if (updateHwm) {
-        this._highWaterMarks.set(sessionId, envelope.id);
+      this._highWaterMarks.set(sessionId, envelope.id);
+      if (envelope.type === "message_update" || envelope.type === "tool_execution_update") {
+        this._deltaHighWaterMarks.set(sessionId, envelope.id);
       }
     }
 
@@ -564,7 +439,6 @@ export class PiClient {
       subject.next(nextState);
     }
 
-    // Side-effects
     if (envelope.type === "turn_end") {
       this._fileSystemChanged$.next();
     } else if (envelope.type === "tool_execution_end") {
@@ -589,150 +463,82 @@ export class PiClient {
   }
 
   // ---------------------------------------------------------------------------
-  // Internal — history processing
+  // Internal — active session management
   // ---------------------------------------------------------------------------
 
-  private _processHistoryEvent(sessionId: string, envelope: StreamEventEnvelope, prepend = false): void {
-    const data = envelope.data as unknown as Record<string, unknown>;
-    if (data["type"] !== "history_messages") return;
-
-    const rawMessages = data["messages"] as Record<string, string>[];
-    const hasMore = data["has_more"] === true;
-    const oldestEntryId = (data["oldest_entry_id"] as string) ?? null;
-
-    if (__DEV__) console.log("[pi:history]", sessionId, rawMessages?.length ?? 0, "messages", prepend ? "(prepend)" : "(replace)", "hasMore:", hasMore);
-
-    const subject = this._getOrCreateSessionSubject(sessionId);
-    const current = subject.getValue();
-
-    if (!rawMessages || rawMessages.length === 0) {
-      subject.next({ ...current, hasMoreMessages: hasMore, oldestEntryId, isLoadingOlderMessages: false });
+  private _setActiveSessionOnBackend(sessionId: string | null): void {
+    const connectionId = this._stream.connectionId;
+    if (!connectionId) {
+      this._pendingActiveSession = sessionId;
       return;
     }
+    this._pendingActiveSession = undefined;
+    this._sendActiveSession(sessionId);
+  }
 
-    const converted = convertRawMessages(rawMessages);
+  private _sendActiveSession(sessionId: string | null): void {
+    const connectionId = this._stream.connectionId;
+    if (!connectionId) return;
+    const fromEventId = sessionId ? this._highWaterMarks.get(sessionId) : undefined;
+    const fromDeltaEventId = sessionId ? this._deltaHighWaterMarks.get(sessionId) : undefined;
+    if (__DEV__) {
+      console.log(
+        "[pi:active-session]",
+        "set",
+        sessionId,
+        "conn=",
+        connectionId,
+        "from=",
+        fromEventId,
+        "fromDelta=",
+        fromDeltaEventId,
+      );
+    }
+    this.api.setActiveSession(connectionId, sessionId, fromEventId, fromDeltaEventId).catch((err) => {
+      if (__DEV__) console.warn("[pi:active-session]", "failed", err);
+    });
+  }
 
-    if (prepend) {
-      // Loading older messages — prepend, dedup by entryId
-      const existingKeys = new Set(current.messages.map((m) => m.entryId).filter(Boolean));
-      const unique = converted.filter((m) => !m.entryId || !existingKeys.has(m.entryId));
+  private async _fetchAndApplyHistory(sessionId: string): Promise<void> {
+    const subject = this._getOrCreateSessionSubject(sessionId);
+
+    try {
+      const result = await this.api.getSessionHistory(sessionId, { limit: 50 });
+      const rawMessages = result.messages as Record<string, string>[];
+      const converted = convertRawMessages(rawMessages);
+      const current = subject.getValue();
+
       subject.next({
         ...current,
-        messages: [...unique, ...current.messages],
-        hasMoreMessages: hasMore,
-        oldestEntryId,
+        messages: converted,
+        hasMoreMessages: result.has_more,
+        oldestEntryId: result.oldest_entry_id ?? null,
+        isReady: true,
+        isLoading: false,
         isLoadingOlderMessages: false,
+        isStreaming: this._activeSessionIds.has(sessionId) ? true : current.isStreaming,
       });
-      return;
+    } catch {
+      const current = subject.getValue();
+      subject.next({ ...current, isReady: true, isLoading: false, isLoadingOlderMessages: false });
     }
-
-    // Full history load — REPLACE. History is the authoritative source for
-    // committed messages. Buffered events (which arrive right after
-    // history_done) will rebuild any in-progress streaming messages.
-    // Do NOT merge with current state — that causes duplicates because
-    // live events and history use different ID formats for the same message.
-    subject.next({
-      ...current,
-      messages: converted,
-      hasMoreMessages: hasMore,
-      oldestEntryId,
-      isLoadingOlderMessages: false,
-    });
-  }
-
-  /**
-   * Called when the session stream finishes sending history + enters connected state.
-   * This is the right moment to mark the session as ready.
-   */
-  private _onSessionHistoryDone(sessionId: string): void {
-    if (__DEV__) console.log("[pi:session]", "history done, marking ready", sessionId);
-    const subject = this._getOrCreateSessionSubject(sessionId);
-    const current = subject.getValue();
-
-    // If the session is known to be active (streaming), mark isStreaming.
-    // The buffered events will arrive right after this and fill in the
-    // streaming message content.
-    const isActive = this._activeSessionIds.has(sessionId);
-
-    subject.next({
-      ...current,
-      isReady: true,
-      isLoading: false,
-      ...(isActive && !current.isStreaming ? { isStreaming: true } : {}),
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Internal — deduplication helpers
-  // ---------------------------------------------------------------------------
-
-  // (dedup is handled by simple replace on full history load,
-  //  and entryId-based dedup on prepend)
-
-  // ---------------------------------------------------------------------------
-  // Internal — session stream management
-  // ---------------------------------------------------------------------------
-
-  private _isSessionStreamConnectedOrLoading(sessionId: string): boolean {
-    const stream = this._sessionStreams.get(sessionId);
-    if (!stream) return false;
-    const status = stream.stateSnapshot.status;
-    return status === "connected" || status === "loading_history" || status === "connecting";
-  }
-
-  private _ensureSessionStream(sessionId: string): void {
-    const isStale = this._staleSessionIds.has(sessionId);
-    this._staleSessionIds.delete(sessionId);
-
-    const stream = this._sessionStreams.get(sessionId);
-    if (stream && stream.stateSnapshot.status === "connected" && !isStale) {
-      if (stream.msSinceLastConnected > 60_000) {
-        if (__DEV__) console.log("[pi:session]", "reconnect (long disconnect, full reload)", sessionId);
-        this._resetHighWaterMark(sessionId);
-        stream.connect(sessionId);
-        return;
-      }
-      if (__DEV__) console.log("[pi:session]", "already connected", sessionId);
-      return;
-    }
-
-    const sessionStream = this._getOrCreateSessionStream(sessionId);
-    const wasLongDisconnect = sessionStream.msSinceLastConnected > 60_000;
-
-    // Always do full history reload on open/stale/long-disconnect.
-    // Never use SKIP_HISTORY — it causes stale cache issues.
-    if (__DEV__) {
-      const reason = isStale ? "stale" : wasLongDisconnect ? "long disconnect" : "full reload";
-      console.log("[pi:session]", `connect (${reason})`, sessionId);
-    }
-    this._resetHighWaterMark(sessionId);
-    sessionStream.connect(sessionId);
-  }
-
-  private _resetHighWaterMark(sessionId: string): void {
-    this._highWaterMarks.delete(sessionId);
   }
 
   private _handleInstanceId(instanceId: string): void {
     if (this._instanceId !== null && this._instanceId !== instanceId) {
-      for (const [id, subject] of this._sessionStates) {
-        if (!this._activeSessionIds.has(id)) {
-          subject.next({ ...createEmptySessionState(), isLoading: true });
-        }
-      }
-      for (const stream of this._sessionStreams.values()) {
-        stream.disconnect();
+      for (const [_id, subject] of this._sessionStates) {
+        subject.next({ ...createEmptySessionState(), isLoading: true });
       }
       this._knownStreamSessionIds.clear();
-      this._staleSessionIds.clear();
       this._highWaterMarks.clear();
+      this._deltaHighWaterMarks.clear();
       this._serverRestart$.next();
     }
     this._instanceId = instanceId;
   }
 
   // ---------------------------------------------------------------------------
-  // Internal — subject/stream factories
+  // Internal — subject factories
   // ---------------------------------------------------------------------------
 
   private _getOrCreateSessionSubject(sessionId: string): BehaviorSubject<SessionState> {
@@ -760,45 +566,4 @@ export class PiClient {
     return subject;
   }
 
-  private _getOrCreateSessionStream(sessionId: string): SessionStreamConnection {
-    let stream = this._sessionStreams.get(sessionId);
-    if (!stream) {
-      stream = new SessionStreamConnection({
-        serverUrl: this._config.serverUrl,
-        getAccessToken: () => this._config.accessToken,
-        getResumeCursor: (sid) => this._getSessionResumeCursor(sid),
-        onAuthError: this._config.onAuthError,
-        reconnectBaseMs: this._config.reconnectBaseMs,
-        reconnectMaxMs: this._config.reconnectMaxMs,
-      });
-
-      // History events → process as history (builds committed messages)
-      stream.historyEvents$.subscribe((envelope) => {
-        if (__DEV__) console.log("[pi:sess-history]", sessionId, envelope.type);
-        this._processHistoryEvent(sessionId, envelope);
-      });
-
-      // History done → mark session ready, buffered/live events follow
-      stream.historyDone$.subscribe(() => {
-        this._onSessionHistoryDone(sessionId);
-      });
-
-      // Live events (buffered events from current turn + new live events)
-      stream.events$.subscribe((envelope) => {
-        this._processSessionEvent(sessionId, envelope);
-      });
-
-      this._sessionStreams.set(sessionId, stream);
-    }
-    return stream;
-  }
-
-  private _getSessionResumeCursor(sessionId: string): string | undefined {
-    const messages = this._getOrCreateSessionSubject(sessionId).getValue().messages;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const entryId = messages[i]?.entryId;
-      if (entryId) return entryId;
-    }
-    return messages.length > 0 ? "SKIP_HISTORY" : undefined;
-  }
 }

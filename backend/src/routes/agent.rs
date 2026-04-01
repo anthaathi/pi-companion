@@ -487,11 +487,15 @@ async fn handle_ws_stream(
         return;
     }
 
+    let (connection_id, conn, mut inject_rx) = state.sse_registry.register().await;
+
     let hello = serde_json::json!({
         "type": "server_hello",
         "instance_id": *state.instance_id,
+        "connection_id": connection_id,
     });
     if !send_ws_batch(&mut socket, vec![hello]).await {
+        state.sse_registry.unregister(&connection_id).await;
         return;
     }
 
@@ -504,6 +508,7 @@ async fn handle_ws_stream(
         replay_payloads.push(stream_event_value(&event));
         if replay_payloads.len() >= WS_MAX_BATCH_EVENTS {
             if !send_ws_batch(&mut socket, replay_payloads).await {
+                state.sse_registry.unregister(&connection_id).await;
                 return;
             }
             replay_payloads = Vec::with_capacity(WS_MAX_BATCH_EVENTS);
@@ -512,6 +517,7 @@ async fn handle_ws_stream(
     if !replay_payloads.is_empty()
         && !send_ws_batch(&mut socket, replay_payloads).await
     {
+        state.sse_registry.unregister(&connection_id).await;
         return;
     }
 
@@ -528,6 +534,7 @@ async fn handle_ws_stream(
         };
         let payload = stream_event_value(&ports_event);
         if !send_ws_batch(&mut socket, vec![payload]).await {
+            state.sse_registry.unregister(&connection_id).await;
             return;
         }
     }
@@ -536,6 +543,7 @@ async fn handle_ws_stream(
     let mut keepalive =
         tokio::time::interval(Duration::from_secs(WS_KEEPALIVE_SECS));
     keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut inject_hwm: u64 = 0;
 
     loop {
         tokio::select! {
@@ -558,12 +566,35 @@ async fn handle_ws_stream(
                     Some(Err(_)) => break,
                 }
             }
+            injected = inject_rx.recv() => {
+                match injected {
+                    Some(value) => {
+                        if let Some(id) = value.get("id").and_then(|v| v.as_u64()) {
+                            if id > inject_hwm {
+                                inject_hwm = id;
+                            }
+                        }
+                        if !send_ws_batch(&mut socket, vec![value]).await {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
             result = rx.recv() => {
                 let mut payloads = match result {
                     Ok(event) => {
-                        if !is_global_event(&event.event_type) {
+                        if inject_hwm > 0 && event.id <= inject_hwm {
                             continue;
                         }
+
+                        if is_session_only_event(&event.event_type)
+                            && is_skippable_for_inactive(&event.event_type)
+                            && !conn.is_session_receiving_deltas(&event.session_id).await
+                        {
+                            continue;
+                        }
+
                         vec![strip_live_event(stream_event_value(&event))]
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -572,6 +603,8 @@ async fn handle_ws_stream(
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
 
+                // Note: drain_ws_pending_payloads doesn't do per-connection filtering
+                // but that's acceptable for batching — the main filter is above
                 let closed = drain_ws_pending_payloads(&mut rx, &mut payloads);
 
                 if !send_ws_batch(&mut socket, payloads).await {
@@ -584,6 +617,8 @@ async fn handle_ws_stream(
             }
         }
     }
+
+    state.sse_registry.unregister(&connection_id).await;
 }
 
 // --- Session Management ---
@@ -1069,7 +1104,121 @@ pub async fn preview_proxy_path(
     .await
 }
 
+// --- Session History (REST) ---
+
+#[utoipa::path(
+    get,
+    path = "/api/sessions/{session_id}/history",
+    params(
+        ("session_id" = String, Path, description = "Session ID"),
+        ("before" = Option<String>, Query, description = "Load messages before this entry ID"),
+        ("limit" = Option<u32>, Query, description = "Max messages to return (default 20)"),
+    ),
+    responses(
+        (status = 200, description = "Paginated session messages", body = SessionHistoryResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Session not found"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "agent"
+)]
+pub async fn session_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+    Query(params): Query<SessionHistoryQuery>,
+) -> (StatusCode, Json<ApiResponse<SessionHistoryResponse>>) {
+    if let Err((code, msg)) = require_auth(&state, &headers).await {
+        return (code, Json(ApiResponse::err(msg)));
+    }
+
+    let base = state.config.sessions_base_path();
+    let sid = session_id.clone();
+    let limit = params.limit.unwrap_or(20);
+    let before = params.before.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        session::get_session_messages_paginated(&base, &sid, limit, before.as_deref())
+    })
+    .await
+    .unwrap();
+
+    match result {
+        Some(paginated) => (
+            StatusCode::OK,
+            Json(ApiResponse::ok(SessionHistoryResponse {
+                messages: paginated.messages,
+                has_more: paginated.has_more,
+                oldest_entry_id: paginated.oldest_entry_id,
+            })),
+        ),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse::err("Session not found")),
+        ),
+    }
+}
+
+// --- Active Session ---
+
+#[utoipa::path(
+    post,
+    path = "/api/stream-active-session",
+    request_body = SetActiveSessionRequest,
+    responses(
+        (status = 200, description = "Active session updated"),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Connection not found"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "agent"
+)]
+pub async fn set_active_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<SetActiveSessionRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err((code, msg)) = require_auth(&state, &headers).await {
+        return (code, Json(ApiResponse::err(msg)));
+    }
+
+    let conn = match state.sse_registry.get(&req.connection_id).await {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiResponse::err("Connection not found")),
+            );
+        }
+    };
+
+    conn.set_active(req.session_id.clone()).await;
+
+    if let Some(ref session_id) = req.session_id {
+        let buffered = state
+            .agent
+            .get_buffered_session_events(session_id, req.from_event_id, req.from_delta_event_id)
+            .await;
+        let collapsed = collapse_buffered_events(buffered);
+        for event in collapsed {
+            let val = stream_event_value(&event);
+            if conn.inject_tx.send(val).is_err() {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse::err("Connection closed")),
+                );
+            }
+        }
+    }
+
+    (StatusCode::OK, Json(ApiResponse::ok(json!({ "ok": true }))))
+}
+
 // --- SSE Stream ---
+
+fn is_skippable_for_inactive(event_type: &str) -> bool {
+    event_type == "message_update" || event_type == "tool_execution_update"
+}
 
 #[utoipa::path(
     get,
@@ -1095,16 +1244,21 @@ pub async fn stream(
     let mut rx = state.agent.subscribe();
     let instance_id = state.instance_id.clone();
     let port_scanner = state.port_scanner.clone();
+    let (connection_id, conn, mut inject_rx) = state.sse_registry.register().await;
+    let registry = state.sse_registry.clone();
+    let conn_id_clone = connection_id.clone();
 
     let stream = async_stream::stream! {
         let hello = serde_json::json!({
             "type": "server_hello",
             "instance_id": *instance_id,
+            "connection_id": connection_id,
         });
         yield Ok::<_, Infallible>(
             Event::default().data(serde_json::to_string(&hello).unwrap_or_default()),
         );
 
+        // Replay buffered global events (no active session set yet, so skip session-only)
         for event in replay_events {
             if !is_global_event(&event.event_type) {
                 continue;
@@ -1115,7 +1269,7 @@ pub async fn stream(
             );
         }
 
-        // Send current port state so the client knows about open ports immediately
+        // Send current port state
         {
             let ports_data = port_scanner.get_current_ports_event().await;
             let ports_event = StreamEvent {
@@ -1130,26 +1284,61 @@ pub async fn stream(
             yield Ok::<_, Infallible>(Event::default().data(data));
         }
 
+        let mut inject_hwm: u64 = 0;
+
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    if !is_global_event(&event.event_type) {
-                        continue;
+            tokio::select! {
+                result = rx.recv() => {
+                    match result {
+                        Ok(event) => {
+                            if inject_hwm > 0 && event.id <= inject_hwm {
+                                continue;
+                            }
+
+                            if is_session_only_event(&event.event_type)
+                                && is_skippable_for_inactive(&event.event_type)
+                                && !conn.is_session_receiving_deltas(&event.session_id).await
+                            {
+                                continue;
+                            }
+
+                            let val = strip_live_event(stream_event_value(&event));
+                            let data = serde_json::to_string(&val).unwrap_or_default();
+                            yield Ok::<_, Infallible>(
+                                Event::default().id(event.id.to_string()).data(data),
+                            );
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            yield Ok::<_, Infallible>(
+                                Event::default().data(stream_lagged_json(n.into())),
+                            );
+                        }
+                        Err(_) => break,
                     }
-                    let val = strip_live_event(stream_event_value(&event));
-                    let data = serde_json::to_string(&val).unwrap_or_default();
-                    yield Ok::<_, Infallible>(
-                        Event::default().id(event.id.to_string()).data(data),
-                    );
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    yield Ok::<_, Infallible>(
-                        Event::default().data(stream_lagged_json(n.into())),
-                    );
+                injected = inject_rx.recv() => {
+                    match injected {
+                        Some(value) => {
+                            let data = serde_json::to_string(&value).unwrap_or_default();
+                            let id = value.get("id").and_then(|v| v.as_u64());
+                            if let Some(id) = id {
+                                if id > inject_hwm {
+                                    inject_hwm = id;
+                                }
+                            }
+                            let mut event = Event::default().data(data);
+                            if let Some(id) = id {
+                                event = event.id(id.to_string());
+                            }
+                            yield Ok::<_, Infallible>(event);
+                        }
+                        None => break,
+                    }
                 }
-                Err(_) => break,
             }
         }
+
+        registry.unregister(&conn_id_clone).await;
     };
 
     Sse::new(stream)
@@ -1210,31 +1399,6 @@ fn collapse_buffered_events(events: Vec<StreamEvent>) -> Vec<StreamEvent> {
     result
 }
 
-fn build_history_replay_events(
-    messages: Vec<Value>,
-    session_id: &str,
-    workspace_id: &str,
-    has_more: bool,
-    oldest_entry_id: Option<String>,
-) -> Vec<StreamEvent> {
-    let now = chrono::Utc::now().timestamp_millis();
-    let data = json!({
-        "type": "history_messages",
-        "messages": messages,
-        "has_more": has_more,
-        "oldest_entry_id": oldest_entry_id,
-    });
-
-    vec![StreamEvent {
-        id: 0,
-        session_id: session_id.to_string(),
-        workspace_id: workspace_id.to_string(),
-        event_type: "history_messages".to_string(),
-        data,
-        timestamp: now,
-    }]
-}
-
 #[utoipa::path(
     get,
     path = "/api/stream/{session_id}",
@@ -1254,56 +1418,19 @@ pub async fn session_stream(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
-    Query(params): Query<SessionStreamQuery>,
+    Query(_params): Query<SessionStreamQuery>,
 ) -> impl IntoResponse {
     if let Err((code, msg)) = require_auth(&state, &headers).await {
         return (code, Json(ApiResponse::<String>::err(msg))).into_response();
     }
 
-    let session_info = state.agent.get_session_info(&session_id).await;
-    let workspace_id = session_info
-        .as_ref()
-        .map(|s| s.workspace_id.clone())
-        .unwrap_or_default();
-
     let mut rx = state.agent.subscribe();
 
-    let skip_history = params.last_message_id.as_deref() == Some("SKIP_HISTORY");
-    let msg_limit = params.limit.unwrap_or(20);
-    let before_cursor = params.before.clone();
-
-    let (history_messages, has_more, oldest_entry_id) = if skip_history {
-        (vec![], false, None)
-    } else {
-        let base = state.config.sessions_base_path();
-        let sid = session_id.clone();
-        let last_msg_id = params.last_message_id.clone();
-        let before = before_cursor.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            if last_msg_id.is_some() {
-                let msgs = session::get_session_messages_after(&base, &sid, last_msg_id.as_deref())
-                    .unwrap_or_default();
-                session::PaginatedMessages { messages: msgs, has_more: false, oldest_entry_id: None }
-            } else {
-                session::get_session_messages_paginated(&base, &sid, msg_limit, before.as_deref())
-                    .unwrap_or(session::PaginatedMessages { messages: vec![], has_more: false, oldest_entry_id: None })
-            }
-        })
-        .await
-        .unwrap();
-        (result.messages, result.has_more, result.oldest_entry_id)
-    };
-
-    let history_events = build_history_replay_events(
-        history_messages,
-        &session_id,
-        &workspace_id,
-        has_more,
-        oldest_entry_id,
-    );
-
     let buffered_events = collapse_buffered_events(
-        state.agent.get_buffered_session_events(&session_id).await,
+        state
+            .agent
+            .get_buffered_session_events(&session_id, None, None)
+            .await,
     );
     let high_water_mark = buffered_events.last().map(|e| e.id).unwrap_or(0);
 
@@ -1316,18 +1443,6 @@ pub async fn session_stream(
         });
         yield Ok::<_, Infallible>(
             Event::default().data(serde_json::to_string(&hello).unwrap_or_default()),
-        );
-
-        for event in history_events {
-            let data = stream_event_json(&event);
-            yield Ok::<_, Infallible>(
-                Event::default().event("history").data(data),
-            );
-        }
-
-        let history_done = serde_json::json!({"type": "history_done"});
-        yield Ok::<_, Infallible>(
-            Event::default().event("history_done").data(serde_json::to_string(&history_done).unwrap_or_default()),
         );
 
         for event in buffered_events {
@@ -1375,9 +1490,6 @@ async fn handle_ws_session_stream(
     state: AppState,
     session_id: String,
     access_token: Option<String>,
-    last_message_id: Option<String>,
-    before_cursor: Option<String>,
-    msg_limit: u32,
 ) {
     let token = match access_token {
         Some(token) => token,
@@ -1402,12 +1514,6 @@ async fn handle_ws_session_stream(
         return;
     }
 
-    let session_info = state.agent.get_session_info(&session_id).await;
-    let workspace_id = session_info
-        .as_ref()
-        .map(|s| s.workspace_id.clone())
-        .unwrap_or_default();
-
     let hello = serde_json::json!({
         "type": "session_stream_hello",
         "session_id": session_id,
@@ -1418,59 +1524,11 @@ async fn handle_ws_session_stream(
 
     let mut rx = state.agent.subscribe();
 
-    let skip_history = last_message_id.as_deref() == Some("SKIP_HISTORY");
-
-    let (history_messages, has_more, oldest_entry_id) = if skip_history {
-        (vec![], false, None)
-    } else {
-        let base = state.config.sessions_base_path();
-        let sid = session_id.clone();
-        let last_msg = last_message_id.clone();
-        let before = before_cursor.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            if last_msg.is_some() {
-                let msgs = session::get_session_messages_after(&base, &sid, last_msg.as_deref())
-                    .unwrap_or_default();
-                session::PaginatedMessages { messages: msgs, has_more: false, oldest_entry_id: None }
-            } else {
-                session::get_session_messages_paginated(&base, &sid, msg_limit, before.as_deref())
-                    .unwrap_or(session::PaginatedMessages { messages: vec![], has_more: false, oldest_entry_id: None })
-            }
-        })
-        .await
-        .unwrap();
-        (result.messages, result.has_more, result.oldest_entry_id)
-    };
-
-    let history_events = build_history_replay_events(
-        history_messages,
-        &session_id,
-        &workspace_id,
-        has_more,
-        oldest_entry_id,
-    );
-
-    let mut history_payloads = Vec::with_capacity(WS_MAX_BATCH_EVENTS);
-    for event in history_events {
-        history_payloads.push(stream_event_value(&event));
-        if history_payloads.len() >= WS_MAX_BATCH_EVENTS {
-            if !send_ws_batch(&mut socket, history_payloads).await {
-                return;
-            }
-            history_payloads = Vec::with_capacity(WS_MAX_BATCH_EVENTS);
-        }
-    }
-    if !history_payloads.is_empty() && !send_ws_batch(&mut socket, history_payloads).await {
-        return;
-    }
-
-    let history_done = serde_json::json!({"type": "history_done"});
-    if !send_ws_batch(&mut socket, vec![history_done]).await {
-        return;
-    }
-
     let buffered_events = collapse_buffered_events(
-        state.agent.get_buffered_session_events(&session_id).await,
+        state
+            .agent
+            .get_buffered_session_events(&session_id, None, None)
+            .await,
     );
     let high_water_mark = buffered_events.last().map(|e| e.id).unwrap_or(0);
 
@@ -1559,7 +1617,7 @@ pub async fn ws_session_stream(
         .or(params.access_token);
     ws.protocols(["pi-stream-v1"])
         .on_upgrade(move |socket| {
-            handle_ws_session_stream(socket, state, session_id, access_token, params.last_message_id, params.before, params.limit.unwrap_or(20))
+            handle_ws_session_stream(socket, state, session_id, access_token)
         })
 }
 

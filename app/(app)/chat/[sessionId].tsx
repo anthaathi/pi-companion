@@ -20,9 +20,11 @@ import { ExtensionUiDialog } from '@/features/agent/components/extension-ui-dial
 import { DiffPanelProvider } from '@/features/agent/components/diff-panel/context';
 import { MobileDiffSheetProvider } from '@/features/agent/components/message-list/mobile-diff-sheet';
 import { useAgentSession, useChatSessions, useConnection } from '@pi-ui/client';
+import type { ImageContent } from '@pi-ui/client';
 import { useChatStore } from '@/features/chat/store';
 import { useWorkspaceStore } from '@/features/workspace/store';
 import type { PendingExtensionUiRequest as LegacyPendingUiRequest } from '@/features/agent/extension-ui';
+import type { Attachment } from '@/features/workspace/components/prompt-input/constants';
 
 export default function ChatSessionScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
@@ -51,9 +53,23 @@ export default function ChatSessionScreen() {
   }, [sessionId, selectSession, registerSessionWorkspace]);
 
   const handleSend = useCallback(
-    async (text: string, _attachments: unknown[], options?: { queueBehavior?: 'steer' | 'followUp' }) => {
+    async (text: string, attachments: Attachment[], options?: { queueBehavior?: 'steer' | 'followUp' }) => {
       if (!sessionId || inputBlocked) return;
       setAlertMessage(null);
+
+      let images: ImageContent[] | undefined;
+      const imageAttachments = attachments.filter((a) => a.type === "image" && a.preview);
+      if (imageAttachments.length > 0) {
+        images = imageAttachments.map((a) => {
+          const dataUrl = a.preview!;
+          const commaIdx = dataUrl.indexOf(",");
+          const meta = dataUrl.slice(0, commaIdx);
+          const base64 = dataUrl.slice(commaIdx + 1);
+          const mimeMatch = meta.match(/data:([^;]+)/);
+          const mimeType = mimeMatch?.[1] ?? "image/png";
+          return { type: "image" as const, data: base64, mimeType };
+        });
+      }
 
       const isFirst = !session.messages.length;
       const behavior = options?.queueBehavior ?? (session.isStreaming ? 'steer' : undefined);
@@ -64,7 +80,7 @@ export default function ChatSessionScreen() {
           : session.prompt;
 
       try {
-        await sendFn(text);
+        await sendFn(text, images ? { images } : undefined);
         if (isFirst) setTimeout(() => invalidateChatSessions(), 2000);
       } catch (error) {
         setAlertMessage(error instanceof Error ? error.message : 'Failed to send prompt');

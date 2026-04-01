@@ -11,6 +11,7 @@ import { SquarePen, RefreshCw } from 'lucide-react-native';
 
 import { Fonts } from '@/constants/theme';
 import { SessionActivityIndicator } from '@/features/workspace/components/session-activity-indicator';
+import { AnimatedListItem } from '@/components/ui/animated-list-item';
 
 export interface SessionItem {
   id: string;
@@ -117,22 +118,23 @@ export function SessionSheetContent({
           <Text style={[styles.emptyText, { color: textMuted }]}>{emptyLabel}</Text>
         ) : (
           sessions.map((session) => (
-            <Pressable
-              key={session.id}
-              onPress={() => onSelect(session.id)}
-              style={({ pressed }) => [
-                styles.sessionItem,
-                session.id === selectedSessionId && {
-                  backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                },
-                pressed && { opacity: 0.7 },
-              ]}
-            >
-              <SessionActivityIndicator sessionId={session.id} color={textMuted} />
-              <Text style={[styles.sessionTitle, { color: textPrimary }]} numberOfLines={1}>
-                {session.display_name ?? session.id}
-              </Text>
-            </Pressable>
+            <AnimatedListItem key={session.id}>
+              <Pressable
+                onPress={() => onSelect(session.id)}
+                style={({ pressed }) => [
+                  styles.sessionItem,
+                  session.id === selectedSessionId && {
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <SessionActivityIndicator sessionId={session.id} color={textMuted} />
+                <Text style={[styles.sessionTitle, { color: textPrimary }]} numberOfLines={1}>
+                  {session.display_name ?? session.id}
+                </Text>
+              </Pressable>
+            </AnimatedListItem>
           ))
         )}
         {hasNextPage && (

@@ -8,4 +8,5 @@ pub mod port_scanner;
 pub mod provider;
 pub mod runtime;
 pub mod session;
+pub mod sse_registry;
 pub mod task;

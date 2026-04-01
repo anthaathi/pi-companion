@@ -53,9 +53,11 @@ export class StreamConnection {
     disconnectedAt: null,
   });
   private readonly _instanceId$ = new Subject<string>();
+  private readonly _connectionId$ = new Subject<string>();
   private readonly _activeSessions$ = new Subject<string[]>();
 
   private readonly _config: StreamConnectionConfig;
+  private _connectionId: string | null = null;
   private _lastEventId: number | null = null;
   private _retryCount = 0;
   private _es: XhrEventSource | null = null;
@@ -76,6 +78,14 @@ export class StreamConnection {
 
   get instanceId$(): Observable<string> {
     return this._instanceId$.asObservable();
+  }
+
+  get connectionId$(): Observable<string> {
+    return this._connectionId$.asObservable();
+  }
+
+  get connectionId(): string | null {
+    return this._connectionId;
   }
 
   get activeSessions$(): Observable<string[]> {
@@ -106,6 +116,7 @@ export class StreamConnection {
     this._events$.complete();
     this._connection$.complete();
     this._instanceId$.complete();
+    this._connectionId$.complete();
     this._activeSessions$.complete();
   }
 
@@ -146,6 +157,10 @@ export class StreamConnection {
       try {
         const raw = JSON.parse(event.data) as Record<string, unknown>;
         if (raw["type"] === "server_hello" && typeof raw["instance_id"] === "string") {
+          if (typeof raw["connection_id"] === "string") {
+            this._connectionId = raw["connection_id"] as string;
+            this._connectionId$.next(this._connectionId);
+          }
           this._instanceId$.next(raw["instance_id"] as string);
           return;
         }

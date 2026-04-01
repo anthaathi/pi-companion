@@ -112,6 +112,7 @@ pub async fn serve(cli: Cli, force_qr: bool) -> anyhow::Result<()> {
         desktop,
         http_client: reqwest::Client::new(),
         instance_id,
+        sse_registry: crate::services::sse_registry::SseConnectionRegistry::new(),
     };
 
     let app = build_app(state);
