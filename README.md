@@ -1,6 +1,4 @@
-# Pico
-
-https://github.com/getpaseo/paseo Please use this as alternative.
+# Pico 
 
 A mobile companion app for [pi-coding-agent](https://github.com/badlogic/pi-mono/). Run the server on your machine, scan the QR code from your phone, and control your coding agent remotely.
 
